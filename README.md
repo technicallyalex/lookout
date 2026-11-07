@@ -1,7 +1,10 @@
 <h1 align="center">
-  <img src="data/branding/lookout-light.svg" width="128" height="128" alt="Daytime lookout logo with a red tally light">
+  <img src="data/branding/lookout-light.svg" width="128" height="128" alt="">
   <br>
-  lookout
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="data/branding/lookout-wordmark-dark.png">
+    <img src="data/branding/lookout-wordmark-light.png" width="168" alt="lookout">
+  </picture>
 </h1>
 
 An OBS plugin with customizable overlays to show the Preview, statics, graphs, and alerts while gaming.  Primarily designed for folks using OBS with a single monitor setup, lookout gives you a real-time look at what OBS is doing when it's hidden behind a game or other full screen applications.  It features rich customization, including the option to hide it from your OBS preview, recordings, and streams.
