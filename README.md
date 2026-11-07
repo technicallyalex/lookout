@@ -21,8 +21,10 @@ Windows x64 and OBS Studio 33 or newer.
 2. Close OBS.
 3. Choose an installation method.
    - **Installer.** Run `install-lookout-<version>.exe`. The package includes the runtime it needs.
-   - **Manual.** Extract the entire `obs-sentinel` folder into `%ProgramData%\obs-studio\plugins\`. Keep `obs-sentinel.dll` and the `ui` folder together inside `obs-sentinel`.
+   - **Manual.** Extract the entire `lookout` folder into `%ProgramData%\obs-studio\plugins\`. Keep `lookout.dll` and the `ui` folder together inside `lookout`.
 4. Start OBS.
+
+Use the installer when upgrading from Release Candidate 1. It replaces the earlier plugin folder, and lookout imports the saved settings on first launch. Reopen the dock from **Docks → lookout** if OBS has saved its previous placement.
 
 ## Use
 

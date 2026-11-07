@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "sentinel.hpp"
+#include "lookout.hpp"
+#include "settings-migration.hpp"
 #include "panel-visuals.hpp"
 #include "card-layout.hpp"
 #include "lookout-brand.hpp"
@@ -64,7 +65,7 @@
 #endif
 namespace {
 constexpr int DockButtonSize=28, DockSpacing=4, DockMargin=4;
-const char *names[] = {"Sentinel.ShowPanel","Sentinel.HidePanel","Sentinel.DisablePanel","Sentinel.Preview","Sentinel.ToggleStats","Sentinel.ToggleCapture","Sentinel.CycleDefaults","Sentinel.CyclePresets"};
+const char *names[] = {"Lookout.ShowPanel","Lookout.HidePanel","Lookout.DisablePanel","Lookout.Preview","Lookout.ToggleStats","Lookout.ToggleCapture","Lookout.CycleDefaults","Lookout.CyclePresets"};
 const char *descriptions[] = {"lookout: Show Panel (persistent)","lookout: Hide Panel (alerts override)","lookout: Disable Panel (also disables alerts)","lookout: Toggle Thumbnail","lookout: Toggle Stats","lookout: Toggle Show in Recordings/Stream","lookout: Cycle Position (Defaults)","lookout: Cycle Position (Presets)"};
 QIcon uiIcon(const QString &role,std::optional<bool> darkMode={}){
  const QMap<QString,QString> names={{"status","show"},{"dismiss","hide"},{"record","recording"},{"stream","streaming"},{"camera","virtual-camera"}};const QString name=names.value(role,role);const bool dark=darkMode.value_or(obs_frontend_is_theme_dark());const QString path=":/lookout/icons/"+QString(dark?"dark/":"light/")+name+".svg";
@@ -101,7 +102,7 @@ class HotkeyEditor final : public QLineEdit {
  }
 public:
  explicit HotkeyEditor(std::function<void(obs_key_combination_t)> commit):commit_(std::move(commit)){
-  setReadOnly(true);setProperty("sentinelHotkeyEditor",true);setPlaceholderText("Click, then press shortcut");setAttribute(Qt::WA_InputMethodEnabled,false);
+  setReadOnly(true);setProperty("lookoutHotkeyEditor",true);setPlaceholderText("Click, then press shortcut");setAttribute(Qt::WA_InputMethodEnabled,false);
  }
 };
 #ifdef _WIN32
@@ -133,10 +134,10 @@ class NotificationPanel final : public QWidget {
   if(property("quickModel").toBool())return;
   const bool enabled=property("clipBlur").toBool();const auto regions=cards();
   if(!enabled){for(auto hwnd:backdrops_)DestroyWindow(hwnd);backdrops_.clear();backdropClips_.clear();backdropSizes_.clear();return;}
-  WNDCLASSW cls{};const HINSTANCE instance=GetModuleHandleW(nullptr);bool available=GetClassInfoW(instance,L"SentinelCardBackdrop",&cls)!=0;if(!available){cls.lpfnWndProc=backdropProc;cls.hInstance=instance;cls.lpszClassName=L"SentinelCardBackdrop";available=RegisterClassW(&cls)!=0;}
+  WNDCLASSW cls{};const HINSTANCE instance=GetModuleHandleW(nullptr);bool available=GetClassInfoW(instance,L"LookoutCardBackdrop",&cls)!=0;if(!available){cls.lpfnWndProc=backdropProc;cls.hInstance=instance;cls.lpszClassName=L"LookoutCardBackdrop";available=RegisterClassW(&cls)!=0;}
   while(backdrops_.size()>regions.size()){DestroyWindow(backdrops_.takeLast());backdropClips_.removeLast();backdropSizes_.removeLast();}
   while(available && backdrops_.size()<regions.size()){
-   HWND hwnd=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TRANSPARENT|WS_EX_TOPMOST,L"SentinelCardBackdrop",L"",WS_POPUP|WS_THICKFRAME|WS_CAPTION,0,0,1,1,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+   HWND hwnd=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TRANSPARENT|WS_EX_TOPMOST,L"LookoutCardBackdrop",L"",WS_POPUP|WS_THICKFRAME|WS_CAPTION,0,0,1,1,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
    if(!hwnd){available=false;break;}
    const int corner=2;DwmSetWindowAttribute(hwnd,33,&corner,sizeof(corner));const DWORD noBorder=0xfffffffe;DwmSetWindowAttribute(hwnd,34,&noBorder,sizeof(noBorder));
    if(!setNativeBlur(hwnd,true)){DestroyWindow(hwnd);available=false;break;}backdrops_<<hwnd;backdropClips_<<QRect();backdropSizes_<<QSize();
@@ -148,7 +149,7 @@ class NotificationPanel final : public QWidget {
    const auto card=regions[i];const RECT target{panelRect.left+LONG(std::round(card.left()*scale)),panelRect.top+LONG(std::round(card.top()*scale)),panelRect.left+LONG(std::round(card.right()*scale)),panelRect.top+LONG(std::round(card.bottom()*scale))};
    const QRect full(0,0,target.right-target.left,target.bottom-target.top);const QRect viewport(panelRect.left,panelRect.top,qRound(width()*scale),qRound(height()*scale));const QRect positioned(target.left,target.top,full.width(),full.height());const QRect visible=positioned.intersected(viewport);if(visible.isEmpty()){ShowWindow(hwnd,SW_HIDE);continue;}
    const QRect clip=visible==positioned?QRect():visible.translated(-positioned.topLeft());if(backdropClips_[i]!=clip || backdropSizes_[i]!=full.size()){
-    if(clip.isNull())SetWindowRgn(hwnd,nullptr,FALSE);else{const int diameter=std::max(1,qRound(SentinelVisuals::PanelRadius*2*scale));HRGN rounded=CreateRoundRectRgn(0,0,full.width()+1,full.height()+1,diameter,diameter),limit=CreateRectRgn(clip.left(),clip.top(),clip.right()+1,clip.bottom()+1);CombineRgn(rounded,rounded,limit,RGN_AND);DeleteObject(limit);if(!SetWindowRgn(hwnd,rounded,FALSE))DeleteObject(rounded);}backdropClips_[i]=clip;backdropSizes_[i]=full.size();
+    if(clip.isNull())SetWindowRgn(hwnd,nullptr,FALSE);else{const int diameter=std::max(1,qRound(LookoutVisuals::PanelRadius*2*scale));HRGN rounded=CreateRoundRectRgn(0,0,full.width()+1,full.height()+1,diameter,diameter),limit=CreateRectRgn(clip.left(),clip.top(),clip.right()+1,clip.bottom()+1);CombineRgn(rounded,rounded,limit,RGN_AND);DeleteObject(limit);if(!SetWindowRgn(hwnd,rounded,FALSE))DeleteObject(rounded);}backdropClips_[i]=clip;backdropSizes_[i]=full.size();
    }
    RECT current{};GetWindowRect(hwnd,&current);const bool changed=current.left!=target.left || current.top!=target.top || current.right!=target.right || current.bottom!=target.bottom;
    const int corner=2;DwmSetWindowAttribute(hwnd,33,&corner,sizeof(corner));const DWORD noBorder=0xfffffffe;DwmSetWindowAttribute(hwnd,34,&noBorder,sizeof(noBorder));
@@ -167,14 +168,14 @@ class NotificationPanel final : public QWidget {
  void paintEvent(QPaintEvent *) override {
   QPainter painter(this);painter.setRenderHint(QPainter::Antialiasing);painter.setCompositionMode(QPainter::CompositionMode_Source);painter.fillRect(rect(),Qt::transparent);
   if(property("glowActive").toBool()){
-   QPainterPath outside,interiors;outside.addRect(rect());for(const auto &card:cards())interiors.addRoundedRect(card,SentinelVisuals::PanelRadius,SentinelVisuals::PanelRadius);painter.save();painter.setClipPath(outside.subtracted(interiors));painter.setCompositionMode(QPainter::CompositionMode_SourceOver);for(const auto &entry:property("glowRegions").toList())SentinelVisuals::paintGlow(painter,entry.toRectF(),property("glowColor").value<QColor>(),property("glowStrength").toDouble(),property("glowIntensity").toDouble(),property("glowSpread").toDouble());painter.restore();
+   QPainterPath outside,interiors;outside.addRect(rect());for(const auto &card:cards())interiors.addRoundedRect(card,LookoutVisuals::PanelRadius,LookoutVisuals::PanelRadius);painter.save();painter.setClipPath(outside.subtracted(interiors));painter.setCompositionMode(QPainter::CompositionMode_SourceOver);for(const auto &entry:property("glowRegions").toList())LookoutVisuals::paintGlow(painter,entry.toRectF(),property("glowColor").value<QColor>(),property("glowStrength").toDouble(),property("glowIntensity").toDouble(),property("glowSpread").toDouble());painter.restore();
   }
   const int design=property("panelDesign").toInt();const double opacity=property("backgroundOpacity").isValid()?property("backgroundOpacity").toDouble():1;
-  for(const auto &card:cards()){SentinelVisuals::paintCardSurface(painter,card,palette(),design,opacity);if(property("editTransforms").toBool()){painter.setPen(QPen(palette().color(QPalette::Mid),1));for(int n=0;n<2;++n){const int d=5+n*4;painter.drawLine(card.bottomRight()-QPointF(d,3),card.bottomRight()-QPointF(3,d));}}}
+  for(const auto &card:cards()){LookoutVisuals::paintCardSurface(painter,card,palette(),design,opacity);if(property("editTransforms").toBool()){painter.setPen(QPen(palette().color(QPalette::Mid),1));for(int n=0;n<2;++n){const int d=5+n*4;painter.drawLine(card.bottomRight()-QPointF(d,3),card.bottomRight()-QPointF(3,d));}}}
  }
 
 public:
- int radius() const {return SentinelVisuals::PanelRadius;}
+ int radius() const {return LookoutVisuals::PanelRadius;}
  QVector<QRectF> cards() const {
   QVector<QRectF> result;
   for(const auto &name:{"panelStats","panelText","panelThumbnail","panelBitrates","panelReplay","panelActiveIcons"})if(auto *item=findChild<QWidget*>(name);item && item->isVisibleTo(this))result<<QRectF(item->mapTo(this,QPoint()),item->size());
@@ -186,7 +187,7 @@ public:
  }
  ~NotificationPanel() override {
 #ifdef _WIN32
-  for(auto hwnd:backdrops_)DestroyWindow(hwnd);UnregisterClassW(L"SentinelCardBackdrop",GetModuleHandleW(nullptr));
+  for(auto hwnd:backdrops_)DestroyWindow(hwnd);UnregisterClassW(L"LookoutCardBackdrop",GetModuleHandleW(nullptr));
 #endif
  }
  NotificationPanel(QWidget *parent,Qt::WindowFlags flags):QWidget(parent,flags){setAttribute(Qt::WA_TranslucentBackground);setAttribute(Qt::WA_NoSystemBackground);}
@@ -208,11 +209,11 @@ class Preview final : public QWidget {
 #ifdef _WIN32
   const HWND hwnd=reinterpret_cast<HWND>(winId());if(IsWindow(hwnd)){const double scale=devicePixelRatioF();HRGN region=CreateRoundRectRgn(0,0,int(std::round(width()*scale))+1,int(std::round(height()*scale))+1,int(16*scale),int(16*scale));if(!SetWindowRgn(hwnd,region,TRUE))DeleteObject(region);return;}
 #endif
-  SentinelVisuals::roundWidget(this,SentinelVisuals::PreviewRadius);
+  LookoutVisuals::roundWidget(this,LookoutVisuals::PreviewRadius);
  }
  static void draw(void *, uint32_t width, uint32_t height) {
   obs_video_info info{}; if (!obs_get_video_info(&info) || !info.base_width || !info.base_height) return;
-  SentinelThumbnail::drawProgram(width,height,info);
+  LookoutThumbnail::drawProgram(width,height,info);
  }
  void showEvent(QShowEvent *e) override {
   QWidget::showEvent(e);roundPreview();
@@ -235,22 +236,22 @@ public:
  ~Preview() override {if(display_) {obs_display_remove_draw_callback(display_, draw, this); obs_display_destroy(display_);}}
 };
 }
-SentinelDock::SentinelDock(const QString &file): settings_(file,QSettings::IniFormat) {
- setObjectName("sentinel"); setMinimumSize(36,36);
+LookoutDock::LookoutDock(const QString &file): settings_(file,QSettings::IniFormat) {
+ setObjectName("lookout"); setMinimumSize(36,36);
  if(settings_.contains("backgroundBlur")){
   const int amount=settings_.value("backgroundBlur").toBool()?settings_.value("blurAmount",100).toInt():0;
   settings_.setValue("blurAmount",std::clamp(amount,0,100));
   settings_.remove("backgroundBlur");
  }
- if(!settings_.contains("panelScale")){if(settings_.contains("panelWidth")){settings_.setValue("panelScale",4);settings_.setValue("customScale",1);}else{auto *screen=QGuiApplication::primaryScreen();const int width=SentinelLayout::presetWidth(1,screen?screen->availableGeometry().size():QSize(1920,1080));settings_.setValue("panelScale",1);settings_.setValue("panelWidth",width+16);settings_.setValue("thumbnailWidth",std::max(80,width-16));}}
+ if(!settings_.contains("panelScale")){if(settings_.contains("panelWidth")){settings_.setValue("panelScale",4);settings_.setValue("customScale",1);}else{auto *screen=QGuiApplication::primaryScreen();const int width=LookoutLayout::presetWidth(1,screen?screen->availableGeometry().size():QSize(1920,1080));settings_.setValue("panelScale",1);settings_.setValue("panelWidth",width+16);settings_.setValue("thumbnailWidth",std::max(80,width-16));}}
 
  settings_.remove("storageApproach");settings_.remove("qualityApproach");settings_.setValue("gib",std::clamp(settings_.value("gib",20).toDouble(),.1,10000.0));
- if(!settings_.contains("customSizePercent")){auto *screen=QGuiApplication::primaryScreen();const double normal=SentinelLayout::presetScale(1,screen?screen->availableGeometry().size():QSize(1920,1080));const double custom=settings_.value("customScale",normal).toDouble();settings_.setValue("customSizePercent",std::clamp(int(std::round(custom*100)),50,300));settings_.setValue("customPanelWidth",settings_.value("panelScale",1).toInt()==4?settings_.value("panelWidth",336):QVariant(int(320*custom)+16));settings_.setValue("customThumbnailWidth",settings_.value("panelScale",1).toInt()==4?settings_.value("thumbnailWidth",304):QVariant(std::max(80,int(320*custom)-16)));}
+ if(!settings_.contains("customSizePercent")){auto *screen=QGuiApplication::primaryScreen();const double normal=LookoutLayout::presetScale(1,screen?screen->availableGeometry().size():QSize(1920,1080));const double custom=settings_.value("customScale",normal).toDouble();settings_.setValue("customSizePercent",std::clamp(int(std::round(custom*100)),50,300));settings_.setValue("customPanelWidth",settings_.value("panelScale",1).toInt()==4?settings_.value("panelWidth",336):QVariant(int(320*custom)+16));settings_.setValue("customThumbnailWidth",settings_.value("panelScale",1).toInt()==4?settings_.value("thumbnailWidth",304):QVariant(std::max(80,int(320*custom)-16)));}
  // Remove obsolete prototype preferences; appearance now follows OBS entirely.
  for(const auto &key:QStringList{"customAccent","accentColor","thumbnail/monitor","thumbnail/corner","thumbnail/offsetX","thumbnail/offsetY","thumbnail/width"})settings_.remove(key);
  if(!settings_.contains("panelMode"))settings_.setValue("panelMode",!settings_.value("enabled",true).toBool()?2:settings_.value("persistent",false).toBool()?1:0);
- if(!settings_.contains("Sentinel.ShowPanel") && settings_.contains("Sentinel.Status"))settings_.setValue("Sentinel.ShowPanel",settings_.value("Sentinel.Status"));
- for(const auto &key:QStringList{"enabled","persistent","Sentinel.Status","Sentinel.Storage","Sentinel.Dismiss"})settings_.remove(key);
+ LookoutMigration::migrateShortcuts(settings_,names,HotkeyCount);
+ settings_.remove("enabled");settings_.remove("persistent");
  for(const auto &option:dockButtonOptions_){
   auto *button=new QPushButton(this);
   button->setObjectName(option.id);
@@ -309,7 +310,7 @@ SentinelDock::SentinelDock(const QString &file): settings_(file,QSettings::IniFo
  for(const char *key:{"animationStyle","animationDuration","animationFallDuration"})settings_.remove(key);
  captureStatus_="Capture exclusion: not checked";
  badge_=new NotificationPanel(nullptr,Qt::Tool|Qt::FramelessWindowHint|Qt::WindowStaysOnTopHint|Qt::WindowDoesNotAcceptFocus|Qt::WindowTransparentForInput);
- badge_->setObjectName("sentinel");badge_->setWindowTitle("lookout panels");badge_->setAccessibleName("lookout status panels"); badge_->setAutoFillBackground(false); badge_->setAttribute(Qt::WA_ShowWithoutActivating); badge_->setFixedWidth(360);
+ badge_->setObjectName("lookout");badge_->setWindowTitle("lookout panels");badge_->setAccessibleName("lookout status panels"); badge_->setAutoFillBackground(false); badge_->setAttribute(Qt::WA_ShowWithoutActivating); badge_->setFixedWidth(360);
  glow_=new GlowOutline(badge_);
  auto *panelRoot=new QVBoxLayout(badge_);panelRoot->setContentsMargins(8,8,8,8);panelRoot->setSpacing(8);
 
@@ -324,7 +325,7 @@ SentinelDock::SentinelDock(const QString &file): settings_(file,QSettings::IniFo
  graphs_=new HistoryGraphs(information_);graphs_->setObjectName("historyGraphs");infoLayout->addWidget(graphs_);graphs_->hide();historyClock_.start();
  for(int metric=0;metric<HistoryGraphs::Count;++metric){graphViews_[metric]=new HistoryGraphs(badge_);graphViews_[metric]->setObjectName(QString("historyGraph%1").arg(metric));graphViews_[metric]->setHistorySource(graphs_);graphViews_[metric]->hide();}
  configureGraphs();
- badge_->setObjectName("sentinelPanel");badge_->installEventFilter(this);
+ badge_->setObjectName("lookoutPanel");badge_->installEventFilter(this);
 badgeText_->setObjectName("panelText");
  previewCard_=new QWidget(badge_);previewCard_->setObjectName("panelThumbnail");auto *previewLayout=new QVBoxLayout(previewCard_);previewLayout->setContentsMargins(8,8,8,8);previewLayout->setSpacing(0);preview_=new Preview(previewCard_);previewLayout->addWidget(preview_);preview_->setObjectName("panelPreview");
  alertIcon_=new QLabel(preview_);alertIcon_->setObjectName("thumbnailAlertIcon");alertIcon_->setAttribute(Qt::WA_NativeWindow);alertIcon_->setFixedSize(32,32);alertIcon_->setAttribute(Qt::WA_TransparentForMouseEvents);alertIcon_->hide();
@@ -332,13 +333,13 @@ badgeText_->setObjectName("panelText");
 
  for(auto *widget:badge_->findChildren<QWidget*>())widget->installEventFilter(this);
  cardLayoutTimer_.setSingleShot(true);cardLayoutTimer_.setInterval(0);connect(&cardLayoutTimer_,&QTimer::timeout,this,[this]{if(ready_){static_cast<NotificationPanel*>(badge_)->updateCards();updateGlow();}});
- transformTimer_.setSingleShot(true);connect(&transformTimer_,&QTimer::timeout,this,&SentinelDock::saveTransform);
- glowClock_.start();glowTimer_.setInterval(33);connect(&glowTimer_,&QTimer::timeout,this,&SentinelDock::updateGlow);
+ transformTimer_.setSingleShot(true);connect(&transformTimer_,&QTimer::timeout,this,&LookoutDock::saveTransform);
+ glowClock_.start();glowTimer_.setInterval(33);connect(&glowTimer_,&QTimer::timeout,this,&LookoutDock::updateGlow);
  updateIcons();
  dismiss_.setSingleShot(true); connect(&dismiss_,&QTimer::timeout,this,[this]{alerts_.clear();alertActive_=false;sessionNotice_=false;refreshPanel();});
  thumbnailAlertPreview_.setSingleShot(true);
  thumbnailAlertPreview_.setInterval(10000);
- connect(&thumbnailAlertPreview_,&QTimer::timeout,this,&SentinelDock::refreshPanel);
+ connect(&thumbnailAlertPreview_,&QTimer::timeout,this,&LookoutDock::refreshPanel);
  for(int i=0;i<HotkeyCount;i++) {
   keyData_[i]={this,i}; keys_[i]=obs_hotkey_register_frontend(names[i],descriptions[i],hotkey,&keyData_[i]);
   auto bytes=settings_.value(names[i]).toByteArray();
@@ -350,9 +351,9 @@ badgeText_->setObjectName("panelText");
  // post_load runs before OBS creates its output handler. Wait for its explicit
  // readiness event; neither an arbitrary delay nor a non-null main window suffices.
  setEnabled(false);
- connect(&timer_,&QTimer::timeout,this,&SentinelDock::tick);
+ connect(&timer_,&QTimer::timeout,this,&LookoutDock::tick);
 }
-SentinelDock::~SentinelDock() {
+LookoutDock::~LookoutDock() {
  delete quick_;quick_=nullptr;
  os_cpu_usage_info_destroy(cpuSampler_);
  detachReplay();iconPop_->stop();timer_.stop();glowTimer_.stop();transformTimer_.stop();cardLayoutTimer_.stop();badge_->removeEventFilter(this);if(dialog_)dialog_->removeEventFilter(this); obs_frontend_remove_event_callback(event,this); saveKeys();
@@ -360,19 +361,19 @@ SentinelDock::~SentinelDock() {
  pool_.waitForDone(); if(lastOutput_) obs_output_release(lastOutput_);
  delete dialog_.data(); if(lastStream_)obs_output_release(lastStream_); delete glow_;delete badge_;
 }
-void SentinelDock::resizeEvent(QResizeEvent *event){
+void LookoutDock::resizeEvent(QResizeEvent *event){
  QWidget::resizeEvent(event);layoutDockActions();
 }
-QStringList SentinelDock::defaultDockOrder(){
+QStringList LookoutDock::defaultDockOrder(){
  QStringList order;
  for(const auto &option:dockButtonOptions_)if(option.defaultVisible)order.append(option.id);
  return order;
 }
-QSize SentinelDock::sizeHint() const {
+QSize LookoutDock::sizeHint() const {
  const int rows=std::max(1,(int(dockOrder_.size())+2)/3);
  return QSize(100,2*DockMargin+rows*DockButtonSize+(rows-1)*DockSpacing);
 }
-void SentinelDock::applyDockOrder(const QStringList &order){
+void LookoutDock::applyDockOrder(const QStringList &order){
  dockOrder_.clear();
  for(const auto &id:order)if(dockButtons_.contains(id) && !dockOrder_.contains(id))dockOrder_.append(id);
  for(auto it=dockButtons_.cbegin();it!=dockButtons_.cend();++it)
@@ -380,7 +381,7 @@ void SentinelDock::applyDockOrder(const QStringList &order){
  for(int i=1;i<dockOrder_.size();++i)setTabOrder(dockButtons_[dockOrder_[i-1]],dockButtons_[dockOrder_[i]]);
  layoutDockActions();updateGeometry();
 }
-void SentinelDock::editDockOrder(const QString &id,const QString &operation){
+void LookoutDock::editDockOrder(const QString &id,const QString &operation){
  QStringList order=dockOrder_;
  if(operation=="reset")order=defaultDockOrder();
  else if(dockButtons_.contains(id)){
@@ -394,7 +395,7 @@ void SentinelDock::editDockOrder(const QString &id,const QString &operation){
  settings_.setValue("dockButtons",order);settings_.sync();
  applyDockOrder(order);
 }
-void SentinelDock::layoutDockActions(){
+void LookoutDock::layoutDockActions(){
  const int count=int(dockOrder_.size());
  if(count==0){setMinimumHeight(2*DockMargin);return;}
  const int pitch=DockButtonSize+DockSpacing;
@@ -404,7 +405,7 @@ void SentinelDock::layoutDockActions(){
  const int rows=(count+columns-1)/columns;
  setMinimumHeight(2*DockMargin+rows*pitch-DockSpacing);
 }
-void SentinelDock::updateIcons(){
+void LookoutDock::updateIcons(){
  updateBranding();
  const bool dark=obs_frontend_is_theme_dark();
  if(iconsInitialized_ && iconsDark_==dark)return;
@@ -413,7 +414,7 @@ void SentinelDock::updateIcons(){
  for(int i=0;i<StatCount;++i)statIcons_[i]->setPixmap(uiIcon(statDefinitions_[i].icon).pixmap(14,14));
  if(dialog_){if(auto *tabs=dialog_->findChild<QTabWidget*>()){tabs->setTabIcon(0,uiIcon("thumbnail"));tabs->setTabIcon(1,uiIcon("alerts"));tabs->setTabIcon(2,uiIcon("hotkeys"));tabs->setTabIcon(3,uiIcon("about"));}if(auto *sections=dialog_->findChild<QTabWidget*>("appearanceSections")){sections->setTabIcon(0,uiIcon("layout"));sections->setTabIcon(1,uiIcon("settings"));sections->setTabIcon(2,uiIcon("graphs"));}}
 }
-bool SentinelDock::darkLogo() const {
+bool LookoutDock::darkLogo() const {
  const bool followsObs=quick_?quick_->panelDesign()=="obs":settings_.value("graphAppearance",1).toInt()==0;
  if(followsObs)return obs_frontend_is_theme_dark();
  const int mode=std::clamp(settings_.value("logoTheme",0).toInt(),0,2);if(mode)return mode==2;
@@ -423,7 +424,7 @@ bool SentinelDock::darkLogo() const {
  return QApplication::palette().color(QPalette::Window).lightness()<128;
 #endif
 }
-void SentinelDock::updateBranding(bool force){
+void LookoutDock::updateBranding(bool force){
  const bool dark=darkLogo();const qreal dpr=devicePixelRatioF(),dialogDpr=dialog_?dialog_->devicePixelRatioF():0;if(!force && brandingInitialized_ && brandingDark_==dark && qFuzzyCompare(brandingDpr_,dpr) && qFuzzyCompare(brandingDialogDpr_,dialogDpr)){if(auto *dock=qobject_cast<QDockWidget*>(parentWidget()))if(dock->windowIcon().cacheKey()!=windowIcon().cacheKey())dock->setWindowIcon(windowIcon());return;}brandingInitialized_=true;brandingDark_=dark;brandingDpr_=dpr;brandingDialogDpr_=dialogDpr;
  const QIcon icon=LookoutBrand::icon(dark,64,dpr);setWindowIcon(icon);if(auto *dock=qobject_cast<QDockWidget*>(parentWidget()))dock->setWindowIcon(icon);
 
@@ -431,15 +432,15 @@ void SentinelDock::updateBranding(bool force){
  if(dialog_){dialog_->setWindowIcon(icon);if(auto *pixels=dialog_->findChild<QDialog*>("pixelControls"))pixels->setWindowIcon(icon);if(auto *image=dialog_->findChild<QLabel*>("lookoutBadge"))image->setPixmap(LookoutBrand::badge(dark,80,dialogDpr));if(auto *about=dialog_->findChild<QTabWidget*>())about->setTabIcon(3,icon);}
  setProperty("logoDark",dark);if(dialog_)dialog_->setProperty("logoDark",dark);
 }
-void SentinelDock::saveKeys() {
+void LookoutDock::saveKeys() {
  for(int i=0;i<HotkeyCount;i++){auto *a=obs_hotkey_save(keys_[i]); auto *d=obs_data_create(); obs_data_set_array(d,"bindings",a); settings_.setValue(names[i],QByteArray(obs_data_get_json(d))); obs_data_release(d); obs_data_array_release(a);} settings_.sync();
 }
-void SentinelDock::hotkey(void *data, obs_hotkey_id, obs_hotkey_t *, bool pressed) {
+void LookoutDock::hotkey(void *data, obs_hotkey_id, obs_hotkey_t *, bool pressed) {
  if(!pressed)return; auto key=*static_cast<Key*>(data);
- QMetaObject::invokeMethod(key.self,[key]{if(!key.self->ready_ || (key.self->quick_ && key.self->quick_->capturingShortcut()))return;if(auto *focus=QApplication::focusWidget();focus && focus->property("sentinelHotkeyEditor").toBool())return;key.self->activateAction(key.action);},Qt::QueuedConnection);
+ QMetaObject::invokeMethod(key.self,[key]{if(!key.self->ready_ || (key.self->quick_ && key.self->quick_->capturingShortcut()))return;if(auto *focus=QApplication::focusWidget();focus && focus->property("lookoutHotkeyEditor").toBool())return;key.self->activateAction(key.action);},Qt::QueuedConnection);
 }
-void SentinelDock::event(obs_frontend_event e, void *data) {
- auto *self=static_cast<SentinelDock*>(data);
+void LookoutDock::event(obs_frontend_event e, void *data) {
+ auto *self=static_cast<LookoutDock*>(data);
  if(e==OBS_FRONTEND_EVENT_EXIT || e==OBS_FRONTEND_EVENT_SCRIPTING_SHUTDOWN) {
   self->detachReplay();self->ready_=false;  self->timer_.stop(); self->dismiss_.stop();
   self->hidePanel();if(self->quick_)self->quick_->stop(); self->setEnabled(false); self->saveKeys(); return;
@@ -471,7 +472,7 @@ void SentinelDock::event(obs_frontend_event e, void *data) {
   if(!failure && self->settings_.value("lifecycle",true).toBool()) self->notify("Session update",text);
   self->tick();},Qt::QueuedConnection);
 }
-void SentinelDock::place(QWidget *window,const QString &prefix){
+void LookoutDock::place(QWidget *window,const QString &prefix){
  if(independentLayout_){placeIndependent();return;}
  auto screens=QGuiApplication::screens();
  auto *screen=screens.value(settings_.value(prefix+"monitor",0).toInt(),QGuiApplication::primaryScreen());
@@ -485,7 +486,7 @@ void SentinelDock::place(QWidget *window,const QString &prefix){
  const int panelWidth=iconStripMode()?std::max(32,activeIcons_->sizeHint().width()+16):
   std::clamp(settings_.value("panelWidth",520).toInt(),128,960);
  const int spacing=panelLayout_->spacing();
- const auto widths=SentinelLayout::groupedWidths(r.width(),panelWidth,
+ const auto widths=LookoutLayout::groupedWidths(r.width(),panelWidth,
   std::clamp(settings_.value("thumbnailWidth",320).toInt(),80,800),spacing,
   position>=2,showMetrics,showThumbnail);
  const int actualWidth=widths.window+2*halo;
@@ -532,7 +533,7 @@ void SentinelDock::place(QWidget *window,const QString &prefix){
  window->move(std::clamp(custom?settings_.value("positionX",x).toInt():x,r.left(),right)-halo,std::clamp(custom?settings_.value("positionY",y).toInt():y,r.top(),bottom)-halo);
  placing_=false;
 }
-QString SentinelDock::overlayBlockReason() const {
+QString LookoutDock::overlayBlockReason() const {
 #ifdef _WIN32
  QUERY_USER_NOTIFICATION_STATE state{};
  if(SUCCEEDED(SHQueryUserNotificationState(&state)) && state==QUNS_RUNNING_D3D_FULL_SCREEN)
@@ -556,7 +557,7 @@ QString SentinelDock::overlayBlockReason() const {
   ? QStringLiteral("Private panels paused: Display Capture uses Automatic or Legacy (DXGI)")
   : QString{};
 }
-bool SentinelDock::showProtected(QWidget *window){
+bool LookoutDock::showProtected(QWidget *window){
  if(!ready_)return false;
  const bool publicPanel=settings_.value("showInCaptures",false).toBool();
  const auto blockReason=overlayBlockReason();
@@ -578,16 +579,16 @@ bool SentinelDock::showProtected(QWidget *window){
  if(!window->isVisible()){placing_=true;window->show();placing_=false;}return true;
 #endif
 }
-bool SentinelDock::metricEnabled(const QString &id) const {return settings_.value(id=="bitrate"?"showBitrate":"iconVisible/"+id,true).toBool();}
-bool SentinelDock::hasReading(int stat) const {return metricEnabled(statDefinitions_[stat].id);}
-int SentinelDock::displayMode() const {
+bool LookoutDock::metricEnabled(const QString &id) const {return settings_.value(id=="bitrate"?"showBitrate":"iconVisible/"+id,true).toBool();}
+bool LookoutDock::hasReading(int stat) const {return metricEnabled(statDefinitions_[stat].id);}
+int LookoutDock::displayMode() const {
  const int mode=settings_.value("statsDisplay",0).toInt();
  return mode==4 || mode==5?mode:0;
 }
-SentinelDock::GraphMode SentinelDock::graphMode(const QString &id) const {
+LookoutDock::GraphMode LookoutDock::graphMode(const QString &id) const {
  return GraphMode(std::clamp(settings_.value("graph/"+id,0).toInt(),0,2));
 }
-void SentinelDock::setDisplayMode(int mode){
+void LookoutDock::setDisplayMode(int mode){
  for(const auto &option:displayModes_)if(option.id==mode){
   settings_.setValue("statsDisplay",mode);
   metricsVisible_=true;
@@ -596,12 +597,12 @@ void SentinelDock::setDisplayMode(int mode){
   return;
  }
 }
-bool SentinelDock::iconStripMode() const {return displayMode()==4 || displayMode()==5;}
-bool SentinelDock::graphsEnabled() const {
+bool LookoutDock::iconStripMode() const {return displayMode()==4 || displayMode()==5;}
+bool LookoutDock::graphsEnabled() const {
  return std::any_of(std::begin(HistoryGraphs::metrics),std::end(HistoryGraphs::metrics),
   [this](const auto &metric){return graphMode(metric.id)!=GraphOff;});
 }
-void SentinelDock::layoutStats(int){
+void LookoutDock::layoutStats(int){
  int position=0;
  for(int i=0;i<StatCount;++i){
   for(auto *widget:{statIcons_[i],statNames_[i],statValues_[i]})statsLayout_->removeWidget(widget);
@@ -614,7 +615,7 @@ void SentinelDock::layoutStats(int){
   ++position;
  }
 }
-void SentinelDock::updateStatusIcons(){
+void LookoutDock::updateStatusIcons(){
  const bool enabled=iconStripMode() && metricsVisible_;QVector<StatusIconsCard::AlertIcon> icons;QStringList fingerprint;auto visible=[this](const QString &id){return metricEnabled(id);};
  auto append=[&](const QString &title,const QString &body,bool preview){QString role=title.contains("encoder",Qt::CaseInsensitive)?"encoder":title.contains("storage",Qt::CaseInsensitive) || title.contains("disk",Qt::CaseInsensitive)?"storage":title.contains("stream",Qt::CaseInsensitive) || title.contains("network",Qt::CaseInsensitive)?"network":"alerts";if(!preview && !visible(role))return;const int stat=role=="storage"?1:role=="encoder"?3:5;const double risk=preview?glowPreviewRisk_:metricRisk(stat);QColor color=title=="Stream reconnected"?badge_->palette().color(QPalette::WindowText):warningColor(risk>=0?risk:title.contains("running low",Qt::CaseInsensitive)?0:1);icons<<StatusIconsCard::AlertIcon{role,uiIcon(role,badge_->palette().color(QPalette::Window).lightness()<128),color,(preview?"Preview: ":QString())+title+": "+body};fingerprint<<role+color.name()+title;};
  if(enabled){for(auto it=alerts_.cbegin();it!=alerts_.cend();++it)append(it.key(),it.value(),false);if(glowPreviewUntil_>glowClock_.elapsed() && !previewAlertTitle_.isEmpty())append(previewAlertTitle_,previewAlertBody_,true);}
@@ -636,7 +637,7 @@ void SentinelDock::updateStatusIcons(){
  std::stable_sort(statuses.begin(),statuses.end(),[&](const auto &a,const auto &b){return order.indexOf(a.id)<order.indexOf(b.id);});
  activeIcons_->setPersistentIcons(statuses);activeIcons_->setScale(panelScale());activeIcons_->setState(false,false,icons);const QString next=fingerprint.join("|");if(next!=iconFingerprint_ && !icons.isEmpty()){iconPop_->stop();activeIcons_->setPulse(0);iconPop_->start();}iconFingerprint_=next;
 }
-void SentinelDock::updateStats(){
+void LookoutDock::updateStats(){
  auto percent=[](const QString &text){const int split=text.indexOf(QString::fromUtf8(" · "));const QString value=split>=0?text.mid(split+3):text;return value.contains('%')?value.section('%',0,0)+"%":value;};
  const double diskGiB=double(freeBytes_)/(1024*1024*1024);const QString disk=freeBytes_<0?"Unavailable":freeBytes_>0 && diskGiB<.1?"<0.1 GiB":QString("%1 GiB").arg(diskGiB,0,'f',1);
  QString diskTime="Idle";
@@ -675,7 +676,7 @@ void SentinelDock::updateStats(){
  applyMetricColors();
 
 }
-void SentinelDock::refreshPanel(){
+void LookoutDock::refreshPanel(){
  if(dragging_ || transformTimer_.isActive())return;
  const bool iconsOnly=iconStripMode();
  setIndependentLayout(settings_.value("independentCards",false).toBool() && !iconsOnly);configureGraphs();applyPanelAppearance();syncVisibilityControls();
@@ -710,8 +711,8 @@ void SentinelDock::refreshPanel(){
  if(!contentVisible || idleHidden){hidePanel();return;}place(badge_,"");presentPanel();updateGlow();
 }
 
-void SentinelDock::dismissAlert(){dismiss_.stop();alerts_.clear();alertActive_=false;sessionNotice_=false;refreshPanel();}
-void SentinelDock::notify(const QString &title,const QString &text,bool critical){
+void LookoutDock::dismissAlert(){dismiss_.stop();alerts_.clear();alertActive_=false;sessionNotice_=false;refreshPanel();}
+void LookoutDock::notify(const QString &title,const QString &text,bool critical){
  if(!ready_ || panelMode()==2)return;
  if(title=="Session update"){sessionNotice_=true;if(settings_.value("untilDismiss",false).toBool())dismiss_.stop();else if(!alertActive_)dismiss_.start(settings_.value("seconds",6).toInt()*1000);refreshPanel();return;}
  if(!settings_.value("untilDismiss",false).toBool())alerts_.clear();
@@ -720,7 +721,7 @@ void SentinelDock::notify(const QString &title,const QString &text,bool critical
  else dismiss_.start(settings_.value("seconds",6).toInt()*1000);
  refreshPanel();
 }
-void SentinelDock::tick(){
+void LookoutDock::tick(){
  if(!ready_)return;
  updateIcons();refreshHotkeyEditors();
  if(cpuSampler_){
@@ -787,7 +788,7 @@ void SentinelDock::tick(){
  for(auto *view:graphViews_)if(view->isVisible())view->update();
  updateStats();updateBitrateCard();refreshPanel();
 }
-void SentinelDock::sampleNetwork(int totalFrames,int dropped,bool reconnecting,bool sameOutput,bool active){
+void LookoutDock::sampleNetwork(int totalFrames,int dropped,bool reconnecting,bool sameOutput,bool active){
  double loss=0;networkSampleValid_=active && sameOutput && totalFrames>networkTotal_ && dropped>=networkDropped_;
  if(networkSampleValid_){
   const int sent=totalFrames-networkTotal_, lost=dropped-networkDropped_;
@@ -804,13 +805,13 @@ void SentinelDock::sampleNetwork(int totalFrames,int dropped,bool reconnecting,b
  }
  networkAlarm_=bad;reconnectAlarm_=reconnecting;networkTotal_=totalFrames;networkDropped_=dropped;
 }
-void SentinelDock::openSettings(){
+void LookoutDock::openSettings(){
  if(quick_){quick_->openSettings();return;}
-#ifdef SENTINEL_WIDGET_QA
+#ifdef LOOKOUT_WIDGET_QA
  if(dialog_){dialog_->show();dialog_->raise();return;}
- auto *d=new QDialog(this);dialog_=d;d->setAttribute(Qt::WA_DeleteOnClose);d->setObjectName("sentinel");d->setWindowTitle("lookout settings");
+ auto *d=new QDialog(this);dialog_=d;d->setAttribute(Qt::WA_DeleteOnClose);d->setObjectName("lookout");d->setWindowTitle("lookout settings");
  auto *root=new QVBoxLayout(d);auto *tabs=new QTabWidget;root->addWidget(tabs);
- auto tab=[&](const QString &title){auto *area=new QScrollArea;area->setWidgetResizable(true);area->setFrameShape(QFrame::NoFrame);auto *page=new QWidget;page->setObjectName("sentinel");area->setWidget(page);tabs->addTab(area,title);auto *box=new QVBoxLayout(page);box->setSpacing(8);return box;};
+ auto tab=[&](const QString &title){auto *area=new QScrollArea;area->setWidgetResizable(true);area->setFrameShape(QFrame::NoFrame);auto *page=new QWidget;page->setObjectName("lookout");area->setWidget(page);tabs->addTab(area,title);auto *box=new QVBoxLayout(page);box->setSpacing(8);return box;};
  auto *appearanceLayout=tab("Appearance");auto *alertsLayout=tab("Alerts");auto *hotkeysLayout=tab("Hotkeys");auto *aboutLayout=tab("About");
  auto *appearanceTabs=new QTabWidget;appearanceTabs->setObjectName("appearanceSections");appearanceLayout->addWidget(appearanceTabs);
  auto section=[&](const QString &name){auto *page=new QWidget;appearanceTabs->addTab(page,name);return new QVBoxLayout(page);};
@@ -896,7 +897,7 @@ void SentinelDock::openSettings(){
  connect(speed,&QDoubleSpinBox::valueChanged,this,[this](double value){settings_.setValue("glowSpeed",value);settings_.sync();updateGlow();});
  layout->addStretch();layout=positionLayout;
  auto *scaleRow=new QHBoxLayout;layout->addLayout(scaleRow);const QStringList scales={"Small","Normal","Large","Extra large"};for(int preset=0;preset<4;++preset){auto *button=new QPushButton(scales[preset]);button->setObjectName(QString("sizePreset%1").arg(preset));button->setCheckable(true);button->setChecked(settings_.value("panelScale",1).toInt()==preset);scaleRow->addWidget(button,1);connect(button,&QPushButton::clicked,this,[this,preset]{applyScalePreset(preset);});}
- auto *customRow=new QHBoxLayout;layout->addLayout(customRow);auto *customButton=new QPushButton("Custom");customButton->setObjectName("sizePreset4");customButton->setCheckable(true);customButton->setChecked(settings_.value("panelScale",1).toInt()==4);customRow->addWidget(customButton);auto *customSize=new QSpinBox;customSize->setObjectName("customSizePercent");customSize->setRange(50,300);customSize->setSuffix(" %");customSize->setKeyboardTracking(false);customSize->setValue(settings_.value("customSizePercent",100).toInt());customSize->setToolTip("Manual panel scale, saved as your single Custom option.");customRow->addWidget(customSize,1);connect(customButton,&QPushButton::clicked,this,&SentinelDock::applyCustomSize);
+ auto *customRow=new QHBoxLayout;layout->addLayout(customRow);auto *customButton=new QPushButton("Custom");customButton->setObjectName("sizePreset4");customButton->setCheckable(true);customButton->setChecked(settings_.value("panelScale",1).toInt()==4);customRow->addWidget(customButton);auto *customSize=new QSpinBox;customSize->setObjectName("customSizePercent");customSize->setRange(50,300);customSize->setSuffix(" %");customSize->setKeyboardTracking(false);customSize->setValue(settings_.value("customSizePercent",100).toInt());customSize->setToolTip("Manual panel scale, saved as your single Custom option.");customRow->addWidget(customSize,1);connect(customButton,&QPushButton::clicked,this,&LookoutDock::applyCustomSize);
  connect(customSize,&QSpinBox::valueChanged,this,[this](int percent){const double scale=percent/100.0;settings_.setValue("customSizePercent",percent);settings_.setValue("customScale",scale);settings_.setValue("customPanelWidth",int(std::round(320*scale))+16);settings_.setValue("customThumbnailWidth",std::max(80,int(std::round(320*scale))-16));applyCustomSize();});
  auto *pixelDialog=new QDialog(d);pixelDialog->setObjectName("pixelControls");pixelDialog->setWindowTitle("Pixel controls");auto *pixelRoot=new QVBoxLayout(pixelDialog);auto *pixelForm=new QFormLayout;pixelRoot->addLayout(pixelForm);auto *pixelClose=new QDialogButtonBox(QDialogButtonBox::Close);pixelRoot->addWidget(pixelClose);connect(pixelClose,&QDialogButtonBox::rejected,pixelDialog,&QDialog::hide);auto *pixelButton=new QPushButton("Pixel controls...");pixelButton->setObjectName("pixelControlsButton");layout->addWidget(pixelButton);connect(pixelButton,&QPushButton::clicked,this,[pixelDialog]{pixelDialog->adjustSize();pixelDialog->show();pixelDialog->raise();});
  // Placement changes are saved immediately and also update visible overlays.
@@ -933,7 +934,7 @@ void SentinelDock::openSettings(){
  connect(thumbnailWidth,&QSpinBox::valueChanged,this,[=](int value){settings_.setValue("thumbnailWidth",value);rememberCustomSize();settings_.sync();syncGeometryControls();refreshPanel();});
  option("independentCards","Move cards individually",false);option("snapCards","Snap cards to each other",true);option("snapScreen","Snap to screen boundaries",true);
  for(const auto &entry:{qMakePair(QString("cardSpacing"),QString("Card spacing")),qMakePair(QString("snapDistance"),QString("Snap distance"))}){auto *value=new QSpinBox;value->setObjectName(entry.first);value->setRange(0,64);value->setSuffix(" px");value->setValue(settings_.value(entry.first,entry.first=="cardSpacing"?8:12).toInt());pixelForm->addRow(entry.second,value);connect(value,&QSpinBox::valueChanged,this,[this,key=entry.first](int n){settings_.setValue(key,n);settings_.sync();refreshPanel();});}
- auto *defaults=new QPushButton("Default");defaults->setObjectName("defaultPosition");layout->addWidget(defaults);connect(defaults,&QPushButton::clicked,this,&SentinelDock::defaultPosition);
+ auto *defaults=new QPushButton("Default");defaults->setObjectName("defaultPosition");layout->addWidget(defaults);connect(defaults,&QPushButton::clicked,this,&LookoutDock::defaultPosition);
  auto *presetHelp=new QLabel("Drag cards while settings are open. Use a size preset or Custom, and Pixel controls for exact dimensions, then Save position.");presetHelp->setWordWrap(true);layout->addWidget(presetHelp);
  auto *presets=new QComboBox;presets->setObjectName("positionPresets");layout->addWidget(presets);
  auto refill=[this,presets]{presets->clear();for(const auto &item:settings_.value("positionPresets").toList())presets->addItem(item.toMap().value("name").toString());};refill();
@@ -950,7 +951,7 @@ void SentinelDock::openSettings(){
   connect(control,&QSpinBox::valueChanged,this,[=](int value){settings_.setValue(key,value);settings_.sync();});};
  auto *storageWarning=new QDoubleSpinBox;storageWarning->setObjectName("gib");storageWarning->setRange(.1,10000);storageWarning->setDecimals(1);storageWarning->setSuffix(" GiB");storageWarning->setKeyboardTracking(false);storageWarning->setValue(std::clamp(settings_.value("gib",20).toDouble(),.1,10000.0));form->addRow("Storage approaching warning",storageWarning);connect(storageWarning,&QDoubleSpinBox::valueChanged,this,[this](double value){settings_.setValue("gib",std::max(.1,value));settings_.sync();storageAlarm_=false;storageFull_=false;refreshPanel();});spin("skip","Skipped frames (%)",2,1,100);spin("networkPercent","Dropped frames (%)",2,1,100);spin("seconds","Notification duration (seconds)",6,2,60);
  auto *approachHelp=new QLabel("Storage uses the warning color below this value and the critical color at zero. Encoder and network alerts activate only at their configured limits.");approachHelp->setObjectName("approachDefinition");approachHelp->setWordWrap(true);alertsLayout->addWidget(approachHelp);
- layout=alertsLayout;option("untilDismiss","Keep notifications until dismissed",false);auto *dismissCurrent=new QPushButton("Dismiss current alerts");dismissCurrent->setObjectName("dismissCurrentAlerts");alertsLayout->addWidget(dismissCurrent);connect(dismissCurrent,&QPushButton::clicked,this,&SentinelDock::dismissAlert);
+ layout=alertsLayout;option("untilDismiss","Keep notifications until dismissed",false);auto *dismissCurrent=new QPushButton("Dismiss current alerts");dismissCurrent->setObjectName("dismissCurrentAlerts");alertsLayout->addWidget(dismissCurrent);connect(dismissCurrent,&QPushButton::clicked,this,&LookoutDock::dismissAlert);
  auto *alertPreviews=new QGroupBox("Preview alerts");alertsLayout->addWidget(alertPreviews);auto *previewButtons=new QGridLayout(alertPreviews);
  const QStringList previewLabels={"Low storage","Storage unavailable","Encoder overload","Dropped frames","Disconnected stream","Storage full","Stream reconnected","Stream stopped with an error"};
  for(int i=0;i<previewLabels.size();++i){auto *button=new QPushButton(previewLabels[i]);button->setObjectName(QString("previewAlert%1").arg(i));previewButtons->addWidget(button,i/2,i%2);connect(button,&QPushButton::clicked,this,[this,i]{previewAlert(i);});}
@@ -969,10 +970,10 @@ void SentinelDock::openSettings(){
  }
  refreshHotkeyEditors();hotkeysLayout->addStretch();
  auto *identity=new QHBoxLayout;aboutLayout->addLayout(identity);auto *logo=new QLabel;logo->setObjectName("lookoutBadge");logo->setFixedSize(80,80);identity->addWidget(logo);auto *brandName=new QLabel("lookout");QFont brandFont("Georgia");brandFont.setPointSize(26);brandName->setFont(brandFont);identity->addWidget(brandName);identity->addStretch();
- auto *about=new QFormLayout;aboutLayout->addLayout(about);about->addRow("Version",new QLabel(QStringLiteral(SENTINEL_VERSION)));about->addRow("Build",new QLabel(QStringLiteral(SENTINEL_BUILD)));
+ auto *about=new QFormLayout;aboutLayout->addLayout(about);about->addRow("Version",new QLabel(QStringLiteral(LOOKOUT_VERSION)));about->addRow("Build",new QLabel(QStringLiteral(LOOKOUT_BUILD)));
  auto *releases=new QLabel("<a href=\"https://github.com/technicallyalex/lookout/releases\">GitHub Releases</a>");
  releases->setObjectName("githubReleases");releases->setOpenExternalLinks(true);
- about->addRow("Release Candidate 1",releases);aboutLayout->addStretch();
+ about->addRow("Release Candidate 2",releases);aboutLayout->addStretch();
  auto *buttons=new QDialogButtonBox(QDialogButtonBox::Close);root->addWidget(buttons);connect(buttons,&QDialogButtonBox::rejected,d,&QDialog::close);
  d->installEventFilter(this);
  // Size to the largest tab's actual content; retain scrolling only as a fallback
@@ -986,21 +987,21 @@ void SentinelDock::openSettings(){
 #endif
 }
 
-void SentinelDock::setEditMode(bool enabled){
+void LookoutDock::setEditMode(bool enabled){
  if(editMode_==enabled)return;
  editHidden_=false;editMode_=enabled;resizing_=false;badge_->setProperty("editTransforms",enabled);badge_->setCursor(enabled?Qt::SizeAllCursor:Qt::ArrowCursor);dragging_=false;transformTimer_.stop();
  if(!enabled){glowPreviewUntil_=0;glowPreviewMetric_=-1;previewAlertTitle_.clear();previewAlertBody_.clear();applyMetricColors();}
  placing_=true;badge_->hide();badge_->setWindowFlag(Qt::WindowTransparentForInput,!enabled);placing_=false;
  refreshPanel();
 }
-void SentinelDock::saveTransform(){
+void LookoutDock::saveTransform(){
  if(!editMode_)return;
  if(independentLayout_){settings_.sync();refreshPanel();return;}
  if(auto *screen=QGuiApplication::screenAt(badge_->frameGeometry().center()))settings_.setValue("monitor",QGuiApplication::screens().indexOf(screen));
  settings_.setValue("customPosition",true);const int halo=overlayPadding();settings_.setValue("positionX",badge_->x()+halo);settings_.setValue("positionY",badge_->y()+halo);settings_.sync();syncGeometryControls();refreshPanel();
 }
-void SentinelDock::defaultPosition(){transformTimer_.stop();dragging_=false;settings_.setValue("customPosition",false);settings_.remove("cardPositions");settings_.sync();refreshPanel();}
-void SentinelDock::savePreset(const QString &name){
+void LookoutDock::defaultPosition(){transformTimer_.stop();dragging_=false;settings_.setValue("customPosition",false);settings_.remove("cardPositions");settings_.sync();refreshPanel();}
+void LookoutDock::savePreset(const QString &name){
  if(transformTimer_.isActive()){transformTimer_.stop();saveTransform();}
  auto list=settings_.value("positionPresets").toList();
  QVariantMap item;item["name"]=name;
@@ -1009,14 +1010,14 @@ void SentinelDock::savePreset(const QString &name){
  for(int i=list.size()-1;i>=0;--i)if(list[i].toMap().value("name").toString()==name)list.removeAt(i);
  if(list.size()>=20)list.removeFirst();list.append(item);settings_.setValue("positionPresets",list);settings_.sync();dockButtons_["cyclePositionPresets"]->setEnabled(true);
 }
-void SentinelDock::removePreset(const QString &name){
+void LookoutDock::removePreset(const QString &name){
  auto list=settings_.value("positionPresets").toList();
  list.erase(std::remove_if(list.begin(),list.end(),[&name](const QVariant &item){
   return item.toMap().value("name").toString()==name;
  }),list.end());
  settings_.setValue("positionPresets",list);settings_.sync();dockButtons_["cyclePositionPresets"]->setEnabled(!list.isEmpty());
 }
-bool SentinelDock::loadPreset(const QString &name){
+bool LookoutDock::loadPreset(const QString &name){
  transformTimer_.stop();dragging_=false;
  for(const auto &entry:settings_.value("positionPresets").toList()){auto item=entry.toMap();if(item.value("name").toString()!=name)continue;
   if(!item.contains("cardWidths"))settings_.remove("cardWidths");
@@ -1024,24 +1025,24 @@ bool SentinelDock::loadPreset(const QString &name){
   settings_.setValue("lastPositionPreset",name);settings_.sync();syncGeometryControls();refreshPanel();return true;
  }return false;
 }
-QMap<QString,QRectF> SentinelDock::visibleCardRects() const {
+QMap<QString,QRectF> LookoutDock::visibleCardRects() const {
  QMap<QString,QRectF> result;for(const auto &entry:{qMakePair(QString("thumbnail"),previewCard_),qMakePair(QString("alert"),static_cast<QWidget*>(badgeText_)),qMakePair(QString("stats"),stats_),qMakePair(QString("bitrate"),static_cast<QWidget*>(bitrates_)),qMakePair(QString("replay"),static_cast<QWidget*>(replay_)),qMakePair(QString("active-icons"),static_cast<QWidget*>(activeIcons_))})if(entry.second->isVisibleTo(badge_))result[entry.first]=QRectF(entry.second->mapToGlobal(QPoint()),entry.second->size());
  for(int metric=0;metric<HistoryGraphs::Count;++metric){auto *view=independentLayout_?graphViews_[metric]:graphs_;if(view->isVisibleTo(badge_)){const auto rect=view->metricRect(metric);if(!rect.isEmpty())result[HistoryGraphs::metrics[metric].card]=rect.translated(view->mapToGlobal(QPoint()));}}
  return result;
 }
-void SentinelDock::enableQuickRenderer(const QString &executable){
+void LookoutDock::enableQuickRenderer(const QString &executable){
  if(quick_)return;badge_->hide();badge_->setProperty("quickModel",true);quick_=new QuickPanelBridge(this,executable);updateBranding();refreshPanel();
 }
-void SentinelDock::presentPanel(){
+void LookoutDock::presentPanel(){
  if(!quick_){showProtected(badge_);return;}
  quickVisible_=ready_;quick_->publish();
 }
-void SentinelDock::hidePanel(){quickVisible_=false;badge_->hide();if(quick_)quick_->publish();}
+void LookoutDock::hidePanel(){quickVisible_=false;badge_->hide();if(quick_)quick_->publish();}
 
-double SentinelDock::panelScale() const {
+double LookoutDock::panelScale() const {
  const int preset=settings_.value("panelScale",1).toInt();
  const bool custom=preset==4;
- auto *screen=QGuiApplication::screens().value(settings_.value("monitor",0).toInt(),QGuiApplication::primaryScreen());const QSize available=screen?screen->availableGeometry().size():QSize(1920,1080);const double requested=custom?std::clamp(settings_.value("customScale",1).toDouble(),.45,3.0):SentinelLayout::presetScale(preset,available);
+ auto *screen=QGuiApplication::screens().value(settings_.value("monitor",0).toInt(),QGuiApplication::primaryScreen());const QSize available=screen?screen->availableGeometry().size():QSize(1920,1080);const double requested=custom?std::clamp(settings_.value("customScale",1).toDouble(),.45,3.0):LookoutLayout::presetScale(preset,available);
  const bool thumbnail=thumbnailDisplayed();
  if(iconStripMode() || (custom && !thumbnail))return requested;
  const double line=QFontMetricsF(font()).height();
@@ -1066,21 +1067,21 @@ double SentinelDock::panelScale() const {
  if(alertActive_ || !previewAlertTitle_.isEmpty()){units+=100;++count;}
  const double height=available.height()-2*settings_.value("offsetY",24).toInt()-16-fixedThumbnail-std::max(0,count-1)*settings_.value("cardSpacing",8).toInt();return std::clamp(units>0?std::min(requested,height/units):requested,0.45,3.0);
 }
-void SentinelDock::applyScalePreset(int preset){
+void LookoutDock::applyScalePreset(int preset){
  auto *screen=QGuiApplication::screens().value(settings_.value("monitor",0).toInt(),QGuiApplication::primaryScreen());const QSize available=screen?screen->availableGeometry().size():QSize(1920,1080);settings_.remove("cardWidths");settings_.setValue("panelScale",preset);const int width=int(std::round(320*panelScale()));settings_.setValue("panelWidth",width+16);settings_.setValue("thumbnailWidth",std::max(80,width-16));settings_.sync();syncGeometryControls();refreshPanel();
 }
-void SentinelDock::applyCustomSize(){
+void LookoutDock::applyCustomSize(){
  settings_.remove("cardWidths");settings_.setValue("panelScale",4);settings_.setValue("panelWidth",settings_.value("customPanelWidth",336));settings_.setValue("thumbnailWidth",settings_.value("customThumbnailWidth",304));settings_.sync();syncGeometryControls();refreshPanel();
 }
-void SentinelDock::rememberCustomSize(){
+void LookoutDock::rememberCustomSize(){
  const double scale=settings_.value("panelScale",1).toInt()==4?settings_.value("customScale",1).toDouble():panelScale();settings_.setValue("customScale",scale);settings_.setValue("panelScale",4);settings_.setValue("customPanelWidth",settings_.value("panelWidth",336));settings_.setValue("customThumbnailWidth",settings_.value("thumbnailWidth",304));settings_.setValue("customSizePercent",std::clamp(int(std::round(scale*100)),45,300));
 }
-QMap<QString,QWidget*> SentinelDock::movableCards() const {
+QMap<QString,QWidget*> LookoutDock::movableCards() const {
  QMap<QString,QWidget*> result;for(const auto &entry:{qMakePair(QString("thumbnail"),previewCard_),qMakePair(QString("alert"),static_cast<QWidget*>(badgeText_)),qMakePair(QString("stats"),stats_),qMakePair(QString("bitrate"),static_cast<QWidget*>(bitrates_)),qMakePair(QString("replay"),static_cast<QWidget*>(replay_)),qMakePair(QString("active-icons"),static_cast<QWidget*>(activeIcons_))})if(!entry.second->isHidden())result.insert(entry.first,entry.second);
  if(independentLayout_){for(int i=0;i<HistoryGraphs::Count;++i)if(!graphViews_[i]->isHidden())result.insert(HistoryGraphs::metrics[i].card,graphViews_[i]);}else if(!graphs_->isHidden())result.insert("graphs",graphs_);
  return result;
 }
-void SentinelDock::setIndependentLayout(bool enabled){
+void LookoutDock::setIndependentLayout(bool enabled){
  if(enabled==independentLayout_)return;placing_=true;transformTimer_.stop();independentLayout_=enabled;
  // Keep ownership stable. Reparenting hidden cards can leave their old
  // rectangles in the next scene sent to the Quick renderer.
@@ -1088,8 +1089,8 @@ void SentinelDock::setIndependentLayout(bool enabled){
  badge_->layout()->setEnabled(!enabled);
  placing_=false;
 }
-void SentinelDock::placeIndependent(){
- auto *screen=QGuiApplication::screens().value(settings_.value("monitor",0).toInt(),QGuiApplication::primaryScreen());if(!screen)return;const QRect available=screen->availableGeometry();const int spacing=settings_.value("cardSpacing",8).toInt(),insetX=std::clamp(settings_.value("offsetX",24).toInt(),0,std::max(0,(available.width()-160)/2)),insetY=std::clamp(settings_.value("offsetY",24).toInt(),0,std::max(0,(available.height()-80)/2));const int width=std::min(std::max(1,available.width()-2*insetX),std::clamp(settings_.value("panelWidth",SentinelLayout::presetWidth(settings_.value("panelScale",1).toInt(),available.size())+16).toInt()-16,112,1200));
+void LookoutDock::placeIndependent(){
+ auto *screen=QGuiApplication::screens().value(settings_.value("monitor",0).toInt(),QGuiApplication::primaryScreen());if(!screen)return;const QRect available=screen->availableGeometry();const int spacing=settings_.value("cardSpacing",8).toInt(),insetX=std::clamp(settings_.value("offsetX",24).toInt(),0,std::max(0,(available.width()-160)/2)),insetY=std::clamp(settings_.value("offsetY",24).toInt(),0,std::max(0,(available.height()-80)/2));const int width=std::min(std::max(1,available.width()-2*insetX),std::clamp(settings_.value("panelWidth",LookoutLayout::presetWidth(settings_.value("panelScale",1).toInt(),available.size())+16).toInt()-16,112,1200));
  placing_=true;
  const auto widths=settings_.value("cardWidths").toMap();
  const auto cardWidth=[&](const QString &id,int fallback){
@@ -1110,13 +1111,13 @@ void SentinelDock::placeIndependent(){
   total+=sizes[id].height()+spacing;
  }
  const int corner=settings_.value("corner",1).toInt();int y=corner<2?available.top()+insetY:std::max(available.top(),available.bottom()-total+spacing-insetY+1);const auto positions=settings_.value("cardPositions").toMap();QRect bounds;cardGeometry_.clear();
- for(const auto &id:order)if(sizes.contains(id)){const int x=corner%2?available.right()-sizes[id].width()-insetX+1:available.left()+insetX;QPoint origin(x,y);if(positions.contains(id)){const QPointF saved=positions.value(id).toPointF();origin=available.topLeft()+QPoint(std::round(saved.x()*available.width()),std::round(saved.y()*available.height()));}origin.setX(std::clamp(origin.x(),available.left(),std::max(available.left(),available.right()-sizes[id].width()+1)));origin.setY(std::clamp(origin.y(),available.top(),std::max(available.top(),available.bottom()-sizes[id].height()+1)));QVector<QRect> occupied;for(const auto &r:cardGeometry_)occupied<<r;origin=SentinelLayout::snapPosition(QRect(origin,sizes[id]),occupied,available,spacing,0,settings_.value("snapCards",true).toBool(),settings_.value("snapScreen",true).toBool(),QMargins(insetX,insetY,insetX,insetY));const QRect card(origin,sizes[id]);cardGeometry_[id]=card;bounds=bounds.isNull()?card:bounds.united(card);y+=sizes[id].height()+spacing;}
+ for(const auto &id:order)if(sizes.contains(id)){const int x=corner%2?available.right()-sizes[id].width()-insetX+1:available.left()+insetX;QPoint origin(x,y);if(positions.contains(id)){const QPointF saved=positions.value(id).toPointF();origin=available.topLeft()+QPoint(std::round(saved.x()*available.width()),std::round(saved.y()*available.height()));}origin.setX(std::clamp(origin.x(),available.left(),std::max(available.left(),available.right()-sizes[id].width()+1)));origin.setY(std::clamp(origin.y(),available.top(),std::max(available.top(),available.bottom()-sizes[id].height()+1)));QVector<QRect> occupied;for(const auto &r:cardGeometry_)occupied<<r;origin=LookoutLayout::snapPosition(QRect(origin,sizes[id]),occupied,available,spacing,0,settings_.value("snapCards",true).toBool(),settings_.value("snapScreen",true).toBool(),QMargins(insetX,insetY,insetX,insetY));const QRect card(origin,sizes[id]);cardGeometry_[id]=card;bounds=bounds.isNull()?card:bounds.united(card);y+=sizes[id].height()+spacing;}
  if(bounds.isNull()){placing_=false;return;}const int halo=overlayPadding();bounds.adjust(-8-halo,-8-halo,8+halo,8+halo);badge_->setMinimumSize(1,1);badge_->setMaximumSize(QWIDGETSIZE_MAX,QWIDGETSIZE_MAX);badge_->setGeometry(bounds);
  information_->setGeometry(badge_->rect());
  for(auto it=cardGeometry_.cbegin();it!=cardGeometry_.cend();++it){auto *widget=widgets.value(it.key());widget->setGeometry(QRect(it.value().topLeft()-bounds.topLeft(),it.value().size()));if(widget->layout())widget->layout()->setGeometry(widget->rect());}
  static_cast<NotificationPanel*>(badge_)->updateCards();placing_=false;
 }
-QVector<QRectF> SentinelDock::glowTargets() const {
+QVector<QRectF> LookoutDock::glowTargets() const {
  QVector<QRectF> result;const bool preview=glowPreviewUntil_>glowClock_.elapsed();bool statsAdded=false;
  if(activeIcons_->isVisibleTo(badge_) && activeIcons_->hasAlerts())return {QRectF(activeIcons_->mapTo(badge_,QPoint()),activeIcons_->size())};
  for(int metric=0;metric<3;++metric){const int stat=1+2*metric;if(preview?glowPreviewMetric_!=stat:metricRisk(stat)<0)continue;
@@ -1125,7 +1126,7 @@ QVector<QRectF> SentinelDock::glowTargets() const {
  }
  if(result.isEmpty() && !thumbnailAlertPreview_.isActive() && alertIcon_->isVisibleTo(badge_))result<<QRectF(previewCard_->mapTo(badge_,QPoint()),previewCard_->size());return result;
 }
-bool SentinelDock::eventFilter(QObject *watched,QEvent *event){
+bool LookoutDock::eventFilter(QObject *watched,QEvent *event){
  if(event->type()==QEvent::LayoutRequest && !placing_)cardLayoutTimer_.start();
 
  if(watched==badge_ && event->type()==QEvent::Hide){badge_->setProperty("glowActive",false);glow_->hide();glowTimer_.stop();}
@@ -1171,14 +1172,14 @@ bool SentinelDock::eventFilter(QObject *watched,QEvent *event){
     settings_.setValue("positionY",windowOrigin_.y()+overlayPadding());
     rememberCustomSize();applyPanelAppearance();configureGraphs();updateStats();place(badge_,"");syncGeometryControls();return true;
    }
-   if(independentLayout_){auto *screen=QGuiApplication::screens().value(settings_.value("monitor",0).toInt(),QGuiApplication::primaryScreen());if(!screen)return true;QVector<QRect> others;for(auto it=cardGeometry_.cbegin();it!=cardGeometry_.cend();++it)if(it.key()!=dragCard_)others<<it.value();const QRect available=screen->availableGeometry();const QPoint origin=SentinelLayout::snapPosition(QRect(dragCardStart_.topLeft()+delta,dragCardStart_.size()),others,available,settings_.value("cardSpacing",8).toInt(),settings_.value("snapDistance",12).toInt(),settings_.value("snapCards",true).toBool(),settings_.value("snapScreen",true).toBool(),QMargins(settings_.value("offsetX",24).toInt(),settings_.value("offsetY",24).toInt(),settings_.value("offsetX",24).toInt(),settings_.value("offsetY",24).toInt()));auto positions=settings_.value("cardPositions").toMap();positions[dragCard_]=QPointF(double(origin.x()-available.left())/available.width(),double(origin.y()-available.top())/available.height());settings_.setValue("cardPositions",positions);placeIndependent();}
+   if(independentLayout_){auto *screen=QGuiApplication::screens().value(settings_.value("monitor",0).toInt(),QGuiApplication::primaryScreen());if(!screen)return true;QVector<QRect> others;for(auto it=cardGeometry_.cbegin();it!=cardGeometry_.cend();++it)if(it.key()!=dragCard_)others<<it.value();const QRect available=screen->availableGeometry();const QPoint origin=LookoutLayout::snapPosition(QRect(dragCardStart_.topLeft()+delta,dragCardStart_.size()),others,available,settings_.value("cardSpacing",8).toInt(),settings_.value("snapDistance",12).toInt(),settings_.value("snapCards",true).toBool(),settings_.value("snapScreen",true).toBool(),QMargins(settings_.value("offsetX",24).toInt(),settings_.value("offsetY",24).toInt(),settings_.value("offsetX",24).toInt(),settings_.value("offsetY",24).toInt()));auto positions=settings_.value("cardPositions").toMap();positions[dragCard_]=QPointF(double(origin.x()-available.left())/available.width(),double(origin.y()-available.top())/available.height());settings_.setValue("cardPositions",positions);placeIndependent();}
    else badge_->move(windowOrigin_+delta);updateGlow();return true;}
   if(event->type()==QEvent::MouseButtonRelease && dragging_){if(target && !quick_)target->releaseMouse();dragging_=false;resizing_=false;badge_->setCursor(Qt::SizeAllCursor);dragCard_.clear();if(transformChanged_)saveTransform();return true;}
  }
  return QWidget::eventFilter(watched,event);
 }
 
-void SentinelDock::syncGeometryControls(){
+void LookoutDock::syncGeometryControls(){
  if(!dialog_)return;
  if(auto *position=dialog_->findChild<QComboBox*>("thumbnailPosition")){QSignalBlocker blocker(position);position->setCurrentIndex(std::clamp(settings_.value("thumbnailPosition",0).toInt(),0,3));position->setEnabled(!settings_.value("independentCards",false).toBool());position->setToolTip(position->isEnabled()?"Thumbnail arrangement within the group":"Individual cards use their saved positions; drag the thumbnail to place it.");}
  for(const auto &key:{"independentCards","snapCards","snapScreen"})if(auto *check=dialog_->findChild<QCheckBox*>(key)){QSignalBlocker blocker(check);check->setChecked(settings_.value(key,QString(key)!="independentCards").toBool());}
@@ -1187,7 +1188,7 @@ void SentinelDock::syncGeometryControls(){
  for(const auto &pair:{qMakePair(QString("Corner"),QString("corner")),qMakePair(QString("Monitor"),QString("monitor"))})if(auto *combo=dialog_->findChild<QComboBox*>(pair.first)){QSignalBlocker blocker(combo);combo->setCurrentIndex(settings_.value(pair.second,combo->currentIndex()).toInt());}
 }
 
-double SentinelDock::metricRisk(int index) const {
+double LookoutDock::metricRisk(int index) const {
  if(index==1 && settings_.value("storage",true).toBool()){
   if(storageUnavailable_)return 1;
   if(freeBytes_<0)return -1;
@@ -1203,17 +1204,17 @@ double SentinelDock::metricRisk(int index) const {
  }else return -1;
  return ratio>=1?1:-1;
 }
-QColor SentinelDock::warningColor(double risk) const {
+QColor LookoutDock::warningColor(double risk) const {
  QColor yellow(settings_.value("glowWarningColor","#ffd43b").toString()),red(settings_.value("glowCriticalColor","#ff3b4d").toString());
  if(!yellow.isValid())yellow=QColor("#ffd43b");if(!red.isValid())red=QColor("#ff3b4d");risk=std::clamp(risk,0.0,1.0);
  return risk>=1?red:yellow;
 }
-void SentinelDock::previewGlow(double risk){
+void LookoutDock::previewGlow(double risk){
  previewAlertTitle_.clear();previewAlertBody_.clear();
  glowPreviewRisk_=std::clamp(risk,0.0,1.0);glowPreviewMetric_=risk<1?1:1+2*QRandomGenerator::global()->bounded(3);
  glowPreviewUntil_=glowClock_.elapsed()+10000;glowPhase_=3.141592654;glowLastFrame_=glowClock_.elapsed();refreshPanel();
 }
-void SentinelDock::previewAlert(int type){
+void LookoutDock::previewAlert(int type){
  const QStringList titles={"Storage running low","Recording storage unavailable","Encoder overload",
    "Stream quality degraded","Stream disconnected","Recording disk full",
    "Stream reconnected","Stream stopped with an error"};
@@ -1235,7 +1236,7 @@ void SentinelDock::previewAlert(int type){
  glowPreviewUntil_=glowClock_.elapsed()+10000;glowPhase_=3.141592654;
  glowLastFrame_=glowClock_.elapsed();refreshPanel();
 }
-void SentinelDock::applyMetricColors(double pulse){
+void LookoutDock::applyMetricColors(double pulse){
  const bool preview=glowPreviewUntil_>glowClock_.elapsed();
  if(pulse<0)pulse=0.08+0.92*(0.5-0.5*std::cos(glowPhase_));
  for(int i=0;i<StatCount;++i){
@@ -1252,7 +1253,7 @@ void SentinelDock::applyMetricColors(double pulse){
   if(statNames_[i]->styleSheet()!=style)statNames_[i]->setStyleSheet(style);
  }
 }
-void SentinelDock::updateGlow(){
+void LookoutDock::updateGlow(){
  const qint64 now=glowClock_.elapsed();
  if(glowPreviewUntil_ && now>=glowPreviewUntil_){glowPreviewUntil_=0;glowPreviewMetric_=-1;previewAlertTitle_.clear();previewAlertBody_.clear();applyMetricColors();refreshPanel();return;}
  const bool preview=glowPreviewUntil_>now;
@@ -1272,18 +1273,18 @@ void SentinelDock::updateGlow(){
  if(!glowTimer_.isActive())glowTimer_.start();
 }
 
-int SentinelDock::overlayPadding() const {return settings_.value("glowEnabled",false).toBool() || glowPreviewUntil_>glowClock_.elapsed()?glowPadding():0;}
-int SentinelDock::glowPadding() const {return std::clamp(settings_.value("glowSpread",24).toInt(),4,64)+2;}
-double SentinelDock::glowPeriod(double risk) const {return (4000-3200*std::clamp(risk,0.0,1.0))/std::clamp(settings_.value("glowSpeed",1).toDouble(),0.25,2.0);}
+int LookoutDock::overlayPadding() const {return settings_.value("glowEnabled",false).toBool() || glowPreviewUntil_>glowClock_.elapsed()?glowPadding():0;}
+int LookoutDock::glowPadding() const {return std::clamp(settings_.value("glowSpread",24).toInt(),4,64)+2;}
+double LookoutDock::glowPeriod(double risk) const {return (4000-3200*std::clamp(risk,0.0,1.0))/std::clamp(settings_.value("glowSpeed",1).toDouble(),0.25,2.0);}
 
-void SentinelDock::setCaptureStatus(const QString &text){captureStatus_=text;if(dialog_)if(auto *label=dialog_->findChild<QLabel*>("captureStatus"))label->setText(text);}
-void SentinelDock::setHotkeyBinding(int index,obs_key_combination_t combination){
+void LookoutDock::setCaptureStatus(const QString &text){captureStatus_=text;if(dialog_)if(auto *label=dialog_->findChild<QLabel*>("captureStatus"))label->setText(text);}
+void LookoutDock::setHotkeyBinding(int index,obs_key_combination_t combination){
  if(index<0 || index>=HotkeyCount)return;
  if(obs_key_combination_is_empty(combination))obs_hotkey_load_bindings(keys_[index],nullptr,0);
  else obs_hotkey_load_bindings(keys_[index],&combination,1);
  saveKeys();if(dialog_)if(auto *edit=dialog_->findChild<QLineEdit*>(QString("hotkeyEditor%1").arg(index))){QSignalBlocker blocker(edit);struct dstr text={};if(!obs_key_combination_is_empty(combination))obs_key_combination_to_str(combination,&text);edit->setText(QString::fromUtf8(text.array?text.array:""));dstr_free(&text);}refreshHotkeyEditors();
 }
-void SentinelDock::refreshHotkeyEditors(){
+void LookoutDock::refreshHotkeyEditors(){
  if(!dialog_)return;
  QMap<QString,QStringList> bindings;
  obs_enum_hotkey_bindings([](void *data,size_t,obs_hotkey_binding_t *binding){
@@ -1295,10 +1296,10 @@ void SentinelDock::refreshHotkeyEditors(){
  const QString fingerprint=all.join("\n");if(fingerprint!=hotkeyFingerprint_){hotkeyFingerprint_=fingerprint;saveKeys();}
 }
 
-double SentinelDock::glowRisk() const {return std::max({metricRisk(1),metricRisk(3),metricRisk(5)});}
+double LookoutDock::glowRisk() const {return std::max({metricRisk(1),metricRisk(3),metricRisk(5)});}
 
-int SentinelDock::panelMode() const {return std::clamp(settings_.value("panelMode",0).toInt(),0,2);}
-void SentinelDock::syncVisibilityControls(){
+int LookoutDock::panelMode() const {return std::clamp(settings_.value("panelMode",0).toInt(),0,2);}
+void LookoutDock::syncVisibilityControls(){
  dockButtons_["toggleThumbnail"]->setChecked(thumbnailEnabled());
  dockButtons_["toggleMetrics"]->setChecked(metricsVisible_);
  dockButtons_["toggleCaptureVisibility"]->setChecked(settings_.value("showInCaptures",false).toBool());
@@ -1320,7 +1321,7 @@ void SentinelDock::syncVisibilityControls(){
  if(auto *mode=dialog_->findChild<QComboBox*>("panelMode")){QSignalBlocker blocker(mode);mode->setCurrentIndex(panelMode());}
  for(const auto &name:QStringList{"showThumbnail","showInCaptures"})if(auto *check=dialog_->findChild<QCheckBox*>(name)){QSignalBlocker blocker(check);check->setChecked(name=="showThumbnail"?thumbnailEnabled():settings_.value(name,name=="showStatus").toBool());}
 }
-void SentinelDock::activateAction(int action){
+void LookoutDock::activateAction(int action){
  if(!ready_)return;
  if((action==0 || action==1) && transformTimer_.isActive()){transformTimer_.stop();saveTransform();}
  const bool wasDisabled=panelMode()==2;
@@ -1347,12 +1348,12 @@ void SentinelDock::activateAction(int action){
  }
  settings_.sync();syncVisibilityControls();if(wasDisabled && panelMode()!=2){storageAlarm_=false;storageFull_=false;encoderAlarm_=false;networkAlarm_=false;reconnectAlarm_=false;tick();}refreshPanel();
 }
-void SentinelDock::previewThumbnailAlert(){
+void LookoutDock::previewThumbnailAlert(){
  if(thumbnailAlertPreview_.isActive())thumbnailAlertPreview_.stop();
  else thumbnailAlertPreview_.start();
  refreshPanel();
 }
-void SentinelDock::updateAlertIcon(){
+void LookoutDock::updateAlertIcon(){
  if(!alertIcon_)return;
  const bool preview=glowPreviewUntil_>glowClock_.elapsed() && !previewAlertTitle_.isEmpty();
  const bool enabled=(alertActive_ || preview) && settings_.value("showAlertIcon",true).toBool() && thumbnailEnabled() && (preview || glowPreviewUntil_<=glowClock_.elapsed());
@@ -1362,22 +1363,22 @@ void SentinelDock::updateAlertIcon(){
  const QString alert=thumbnailPreview?QStringLiteral("storage"):(preview?previewAlertTitle_:lastAlertTitle_+" "+lastAlertBody_).toLower();
  if(alert.contains("storage") || alert.contains("disk"))role="storage";else if(alert.contains("encoder"))role="encoder";else if(alert.contains("stream") || alert.contains("network"))role="network";else if(alert.contains("recording"))role="record";else if(alert.contains("camera"))role="camera";
  if(!thumbnailPreview && !metricEnabled(role=="record"?"recording":role=="stream"?"streaming":role)){alertIcon_->hide();return;}
- alertIcon_->setProperty("alertRole",role);const int size=std::clamp(std::min(preview_->width(),preview_->height())/2,24,160);alertIcon_->setFixedSize(size,size);const qreal tileDpr=preview_->devicePixelRatioF();QPixmap tile(QSize(int(std::ceil(size*tileDpr)),int(std::ceil(size*tileDpr))));tile.setDevicePixelRatio(tileDpr);tile.fill(Qt::transparent);QPainter painter(&tile);painter.setRenderHint(QPainter::Antialiasing);QColor backdrop=badge_->palette().color(QPalette::Window);backdrop.setAlpha(210);painter.setBrush(backdrop);const bool restored=(preview?previewAlertTitle_:lastAlertTitle_)=="Stream reconnected";const QColor rim=thumbnailPreview?warningColor(0):restored?badge_->palette().color(QPalette::WindowText):warningColor(preview?glowPreviewRisk_:std::max(0.0,glowRisk()));alertIcon_->setProperty("alertColor",rim);painter.setPen(QPen(rim,SentinelVisuals::BorderWidth));painter.drawRoundedRect(QRectF(.5,.5,size-1,size-1),SentinelVisuals::PanelRadius,SentinelVisuals::PanelRadius);const int inset=size/5;painter.drawPixmap(QRect(inset,inset,size-2*inset,size-2*inset),uiIcon(role,backdrop.lightness()<128).pixmap(QSize(int((size-2*inset)*tileDpr),int((size-2*inset)*tileDpr))));painter.end();alertIcon_->setPixmap(tile);SentinelVisuals::roundWidget(alertIcon_,SentinelVisuals::PanelRadius);alertIcon_->move((preview_->width()-size)/2,(preview_->height()-size)/2);alertIcon_->show();alertIcon_->raise();
+ alertIcon_->setProperty("alertRole",role);const int size=std::clamp(std::min(preview_->width(),preview_->height())/2,24,160);alertIcon_->setFixedSize(size,size);const qreal tileDpr=preview_->devicePixelRatioF();QPixmap tile(QSize(int(std::ceil(size*tileDpr)),int(std::ceil(size*tileDpr))));tile.setDevicePixelRatio(tileDpr);tile.fill(Qt::transparent);QPainter painter(&tile);painter.setRenderHint(QPainter::Antialiasing);QColor backdrop=badge_->palette().color(QPalette::Window);backdrop.setAlpha(210);painter.setBrush(backdrop);const bool restored=(preview?previewAlertTitle_:lastAlertTitle_)=="Stream reconnected";const QColor rim=thumbnailPreview?warningColor(0):restored?badge_->palette().color(QPalette::WindowText):warningColor(preview?glowPreviewRisk_:std::max(0.0,glowRisk()));alertIcon_->setProperty("alertColor",rim);painter.setPen(QPen(rim,LookoutVisuals::BorderWidth));painter.drawRoundedRect(QRectF(.5,.5,size-1,size-1),LookoutVisuals::PanelRadius,LookoutVisuals::PanelRadius);const int inset=size/5;painter.drawPixmap(QRect(inset,inset,size-2*inset,size-2*inset),uiIcon(role,backdrop.lightness()<128).pixmap(QSize(int((size-2*inset)*tileDpr),int((size-2*inset)*tileDpr))));painter.end();alertIcon_->setPixmap(tile);LookoutVisuals::roundWidget(alertIcon_,LookoutVisuals::PanelRadius);alertIcon_->move((preview_->width()-size)/2,(preview_->height()-size)/2);alertIcon_->show();alertIcon_->raise();
 }
 
-bool SentinelDock::thumbnailEnabled() const {return settings_.value("showThumbnail",false).toBool();}
-bool SentinelDock::thumbnailDisplayed() const {return thumbnailEnabled() || thumbnailAlertPreview_.isActive();}
-void SentinelDock::updateBitrateCard(){
+bool LookoutDock::thumbnailEnabled() const {return settings_.value("showThumbnail",false).toBool();}
+bool LookoutDock::thumbnailDisplayed() const {return thumbnailEnabled() || thumbnailAlertPreview_.isActive();}
+void LookoutDock::updateBitrateCard(){
  bitrates_->setOutputs(recordingActive_,streamingActive_,recordingBitrate_,streamingBitrate_,historyClock_.elapsed());
  bitrates_->setVisible(metricsVisible_ && graphMode("bitrate")!=GraphOff && !iconStripMode());
 }
-std::optional<double> SentinelDock::diskMinutesRemaining() const {
+std::optional<double> LookoutDock::diskMinutesRemaining() const {
  if(!recordingActive_ || recordingPaused_)return std::nullopt;
  if(freeBytes_==0)return 0;
  const auto seconds=recordingSpace_.secondsRemaining(freeBytes_);
  return seconds?std::optional<double>(std::min(*seconds/60,365*1440.0)):std::nullopt;
 }
-void SentinelDock::configureGraphs(){
+void LookoutDock::configureGraphs(){
  const int design=quick_?0:settings_.value("graphAppearance",1).toInt(),seconds=settings_.value("graphWindow",60).toInt();
  const std::array<double,HistoryGraphs::Count> thresholds={settings_.value("gib",20).toDouble(),
    settings_.value("skip",2).toDouble(),settings_.value("networkPercent",2).toDouble(),-1,-1,-1};
@@ -1405,7 +1406,7 @@ void SentinelDock::configureGraphs(){
 }
 
 
-void SentinelDock::applyPanelAppearance(){
+void LookoutDock::applyPanelAppearance(){
  const int design=quick_?0:std::clamp(settings_.value("graphAppearance",1).toInt(),0,8);
  replay_->setPresentation(design,graphMode("replay")==GraphMini,settings_.value("graphWindow",60).toInt(),uiIcon("replay",design==0?obs_frontend_is_theme_dark():design==8?darkLogo():design!=7),panelScale());
  const double scale=panelScale();if(settings_.value("panelScale",1).toInt()!=4){const int width=int(std::round(320*scale));settings_.setValue("panelWidth",width+16);settings_.setValue("thumbnailWidth",std::max(80,width-16));syncGeometryControls();}
@@ -1415,7 +1416,7 @@ void SentinelDock::applyPanelAppearance(){
  const int spacing=settings_.value("cardSpacing",8).toInt();panelLayout_->setSpacing(spacing);information_->layout()->setSpacing(spacing);badge_->layout()->setSpacing(spacing);
  for(int i=0;i<StatCount;++i){const int size=std::max(10,int(14*scale));statIcons_[i]->setFixedSize(size,size);statIcons_[i]->setPixmap(uiIcon(statDefinitions_[i].icon,design==0?obs_frontend_is_theme_dark():design==8?darkLogo():design!=7).pixmap(size,size));}
 
- const QPalette colors=quick_?quick_->panelPalette():SentinelVisuals::panelPalette(QApplication::palette(),design,darkLogo());
+ const QPalette colors=quick_?quick_->panelPalette():LookoutVisuals::panelPalette(QApplication::palette(),design,darkLogo());
  if(badge_->property("appliedPanelPalette").value<QPalette>()!=colors || badge_->property("panelDesign").toInt()!=design){badge_->setPalette(colors);badge_->setProperty("appliedPanelPalette",colors);badge_->setProperty("panelDesign",design);badge_->update();}
  // Scope palette/font rules to the custom overlay, shielding it from OBS's
  // global QWidget stylesheet without changing native dock/settings controls.
@@ -1431,9 +1432,9 @@ void SentinelDock::applyPanelAppearance(){
  if(dialog_)if(auto *status=dialog_->findChild<QLabel*>("blurStatus")){status->setText("Background blur is unavailable on this system.");status->setVisible(blur&&!badge_->property("blurAvailable").toBool());}
 }
 
-void SentinelDock::replayPacket(obs_output_t*,encoder_packet *packet,encoder_packet_time*,void *data){if(packet)static_cast<SentinelDock*>(data)->replayTracker_.append(packet->dts_usec,packet->size,packet->type==OBS_ENCODER_VIDEO && packet->keyframe);}
-void SentinelDock::detachReplay(){if(replayOutput_){obs_output_remove_packet_callback(replayOutput_,replayPacket,this);obs_output_release(replayOutput_);replayOutput_=nullptr;}replayTracker_.reset();}
-void SentinelDock::updateReplay(){
+void LookoutDock::replayPacket(obs_output_t*,encoder_packet *packet,encoder_packet_time*,void *data){if(packet)static_cast<LookoutDock*>(data)->replayTracker_.append(packet->dts_usec,packet->size,packet->type==OBS_ENCODER_VIDEO && packet->keyframe);}
+void LookoutDock::detachReplay(){if(replayOutput_){obs_output_remove_packet_callback(replayOutput_,replayPacket,this);obs_output_release(replayOutput_);replayOutput_=nullptr;}replayTracker_.reset();}
+void LookoutDock::updateReplay(){
  if(!ready_)return;replayActive_=obs_frontend_replay_buffer_active();obs_output_t *output=replayActive_?obs_frontend_get_replay_buffer_output():nullptr;
  if(output!=replayOutput_){detachReplay();replayOutput_=output;if(output){auto *settings=obs_output_get_settings(output);replayTracker_.reset(obs_data_get_int(settings,"max_time_sec"),quint64(std::max<long long>(0,obs_data_get_int(settings,"max_size_mb")))*1048576);obs_data_release(settings);obs_output_add_packet_callback(output,replayPacket,this);}}else if(output)obs_output_release(output);
  replay_->setSample(replayActive_,replayTracker_.sample(),historyClock_.elapsed());

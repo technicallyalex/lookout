@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
-using namespace SentinelTelemetry;
+using namespace LookoutTelemetry;
 static void check(bool ok,const char *message){if(!ok){std::fprintf(stderr,"FAIL: %s\n",message);std::exit(1);}}
 static bool equal(std::optional<double> measured,double expected){return measured && std::abs(*measured-expected)<=std::max(1e-6,std::abs(expected)*1e-12);}
 int main(){

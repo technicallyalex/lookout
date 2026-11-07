@@ -4,7 +4,7 @@
 #include <cmath>
 #include <limits>
 
-namespace SentinelLayout {
+namespace LookoutLayout {
 namespace {
 QRect usableScreen(QRect screen, QMargins insets) {
  const int left=std::clamp(insets.left(),0,std::max(0,screen.width()-1));

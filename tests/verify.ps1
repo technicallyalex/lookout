@@ -49,8 +49,8 @@ function Invoke-Checks([string] $Build, [string] $Name) {
     Check-Exit "$Name tests"
 }
 
-$qaVariables = 'SENTINEL_QUICK_QA', 'SENTINEL_GPU_CAPTURE', 'SENTINEL_BLUR_CAPTURE',
-    'SENTINEL_WGC_QA', 'SENTINEL_REPLAY_QA', 'SENTINEL_SCREENSHOT', 'SENTINEL_OBS_ROOT'
+$qaVariables = 'LOOKOUT_QUICK_QA', 'LOOKOUT_GPU_CAPTURE', 'LOOKOUT_BLUR_CAPTURE',
+    'LOOKOUT_WGC_QA', 'LOOKOUT_REPLAY_QA', 'LOOKOUT_SCREENSHOT', 'LOOKOUT_OBS_ROOT'
 $previous = @{}
 foreach ($name in $qaVariables + @('PATH', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH',
         'QML_IMPORT_PATH', 'TEMP', 'TMP', 'MSBUILDDISABLENODEREUSE')) {
@@ -75,25 +75,25 @@ try {
     }
     if ($Scope -eq 'Desktop') {
         Use-ObsRuntime
-        $renderer = Join-Path $project 'dist/obs-sentinel/ui/lookout-ui.exe'
+        $renderer = Join-Path $project 'dist/lookout/ui/lookout-ui.exe'
         $builtRenderer = Join-Path $quickBuild "$configuration/lookout-ui.exe"
         if (!(Test-Path -LiteralPath $renderer) -or !(Test-Path -LiteralPath $builtRenderer) -or
             (Get-FileHash -LiteralPath $renderer).Hash -ne (Get-FileHash -LiteralPath $builtRenderer).Hash) {
             throw 'Package the current renderer with installer/package.ps1 before running desktop QA.'
         }
         $cache = Get-BuildCache $nativeBuild
-        & $cache.CMAKE_COMMAND --build $nativeBuild --config $configuration --parallel 1 --target sentinel-startup-tests
+        & $cache.CMAKE_COMMAND --build $nativeBuild --config $configuration --parallel 1 --target lookout-startup-tests
         Check-Exit 'Desktop harness build'
         $evidence = Join-Path $nativeBuild ('desktop-qa/' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
         New-Item -ItemType Directory -Path $evidence -Force | Out-Null
-        $env:SENTINEL_QUICK_QA = $renderer
-        $env:SENTINEL_GPU_CAPTURE = Join-Path $evidence 'overlay'
-        $env:SENTINEL_BLUR_CAPTURE = Join-Path $evidence 'blur'
-        $env:SENTINEL_WGC_QA = $env:SENTINEL_REPLAY_QA = '1'
-        $env:SENTINEL_OBS_ROOT = (Get-Item -LiteralPath $ObsBin).Parent.Parent.FullName
+        $env:LOOKOUT_QUICK_QA = $renderer
+        $env:LOOKOUT_GPU_CAPTURE = Join-Path $evidence 'overlay'
+        $env:LOOKOUT_BLUR_CAPTURE = Join-Path $evidence 'blur'
+        $env:LOOKOUT_WGC_QA = $env:LOOKOUT_REPLAY_QA = '1'
+        $env:LOOKOUT_OBS_ROOT = (Get-Item -LiteralPath $ObsBin).Parent.Parent.FullName
         Push-Location -LiteralPath $ObsBin
         try {
-            & (Join-Path $nativeBuild "$configuration/sentinel-startup-tests.exe") -platform windows 2>&1 |
+            & (Join-Path $nativeBuild "$configuration/lookout-startup-tests.exe") -platform windows 2>&1 |
                 Tee-Object -FilePath (Join-Path $evidence 'desktop.log')
             Check-Exit 'Windows desktop QA'
         }

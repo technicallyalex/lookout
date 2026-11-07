@@ -4,7 +4,7 @@
 #include <QPainter>
 #include <algorithm>
 #include <cmath>
-using namespace SentinelTelemetry;
+using namespace LookoutTelemetry;
 void ReplayTracker::reset(double seconds,quint64 bytes){std::lock_guard<std::mutex> lock(mutex_);groups_.clear();bytes_=0;seconds_=std::max(0.0,seconds);limit_=bytes;}
 void ReplayTracker::append(qint64 dts,quint64 bytes,bool keyframe){
  std::lock_guard<std::mutex> lock(mutex_);

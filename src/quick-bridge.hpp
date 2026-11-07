@@ -13,14 +13,14 @@
 #include <atomic>
 #include <mutex>
 #include <graphics/graphics.h>
-class SentinelDock;
+class LookoutDock;
 
 // No Quick/QML runtime is loaded into OBS. The private child receives bounded,
 // versioned local messages and a keyed-mutex GPU texture, never video pixels.
 class QuickPanelBridge final:public QObject {
- friend struct SentinelTestAccess;
+ friend struct LookoutTestAccess;
 public:
- explicit QuickPanelBridge(SentinelDock *dock,const QString &executable);
+ explicit QuickPanelBridge(LookoutDock *dock,const QString &executable);
  ~QuickPanelBridge() override;
  void publish();
  void stop();
@@ -36,7 +36,7 @@ public:
  bool transitionPreviewActive() const;
  QJsonObject snapshot(const QString &blockReason={}) const;
 private:
- SentinelDock *dock_;
+ LookoutDock *dock_;
  QLocalServer server_;
  QPointer<QLocalSocket> socket_;
  QProcess process_;

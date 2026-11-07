@@ -6,7 +6,7 @@
 #include <QSize>
 #include <QVector>
 
-namespace SentinelLayout {
+namespace LookoutLayout {
 // Rectangles use Qt's inclusive right/bottom coordinates. Spacing is the number
 // of clear pixels between cards. Screen insets apply when screen snapping is on;
 // cards are kept accessible on the screen even when snapping is off.

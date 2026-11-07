@@ -3,7 +3,7 @@
 #define NOMINMAX
 #endif
 #include "quick-bridge.hpp"
-#include "sentinel.hpp"
+#include "lookout.hpp"
 #include <QApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -179,7 +179,7 @@ void QuickPanelBridge::publishSettings()
   {"transitionPreview",transitionPreviewActive()},
   {"dark",obs_frontend_is_theme_dark()},{"logoDark",dock.darkLogo()},
   {"palette",paletteJson(obsPalette)},{"captureStatus",dock.captureStatus_},
-  {"version",QStringLiteral(SENTINEL_VERSION)},{"build",QStringLiteral(SENTINEL_BUILD)}};
+  {"version",QStringLiteral(LOOKOUT_VERSION)},{"build",QStringLiteral(LOOKOUT_BUILD)}};
  const auto bytes=QJsonDocument(state).toJson(QJsonDocument::Compact);
  if(bytes==lastSettings_)return;
  send({{"type","settings"},{"state",state},{"open",lastSettings_.isEmpty()}});
@@ -213,7 +213,7 @@ void QuickPanelBridge::settingsCommand(const QJsonObject &message)
  if(action=="shortcut"){
   const int index=message["index"].toInt(-1);
   const int native=value.toInt(0);
-  if(index>=0 && index<SentinelDock::HotkeyCount && native>=0 && native<=255){
+  if(index>=0 && index<LookoutDock::HotkeyCount && native>=0 && native<=255){
    const auto keyCode=obs_key_from_virtual_key(native);
    const int mask=message["modifiers"].toInt();
    uint32_t modifiers=0;
@@ -265,9 +265,9 @@ void QuickPanelBridge::settingsCommand(const QJsonObject &message)
    const int style=value.toInt(-1);
    const bool known=std::any_of(std::begin(HistoryGraphs::metrics),std::end(HistoryGraphs::metrics),
     [&](const auto &metric){return id==metric.id;}) || id=="bitrate" || id=="replay";
-   if(!known || style<SentinelDock::GraphOff || style>SentinelDock::GraphFull)return;
+   if(!known || style<LookoutDock::GraphOff || style>LookoutDock::GraphFull)return;
    settings.setValue(key,style);
-   if(style!=SentinelDock::GraphOff)dock.metricsVisible_=true;
+   if(style!=LookoutDock::GraphOff)dock.metricsVisible_=true;
   }
   else if(key=="thumbnail" && value.isBool())
    settings.setValue("showThumbnail",value.toBool());

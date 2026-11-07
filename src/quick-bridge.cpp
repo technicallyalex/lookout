@@ -3,7 +3,7 @@
 #define NOMINMAX
 #endif
 #include "quick-bridge.hpp"
-#include "sentinel.hpp"
+#include "lookout.hpp"
 #include "thumbnail-render.hpp"
 #include <QApplication>
 #include <QJsonDocument>
@@ -29,7 +29,7 @@ namespace {
 QJsonObject rect(const QRectF &r){return {{"x",r.x()},{"y",r.y()},{"w",r.width()},{"h",r.height()}};}
 QString color(const QColor &c){return c.name(QColor::HexArgb);}
 }
-QuickPanelBridge::QuickPanelBridge(SentinelDock *dock,const QString &executable):QObject(dock),dock_(dock),executable_(executable){
+QuickPanelBridge::QuickPanelBridge(LookoutDock *dock,const QString &executable):QObject(dock),dock_(dock),executable_(executable){
  transitionPreviewTimer_.setSingleShot(true);
  connect(&transitionPreviewTimer_,&QTimer::timeout,this,&QuickPanelBridge::advanceTransitionPreview);
  pointerTimer_.setInterval(16);
@@ -207,7 +207,7 @@ void QuickPanelBridge::render(void *data){
  vec4 background{};
  vec4_set(&background,0,0,0,1);
  gs_clear(GS_CLEAR_COLOR,&background,1,0);
- SentinelThumbnail::drawProgram(width,height,video);
+ LookoutThumbnail::drawProgram(width,height,video);
  gs_set_render_target_with_color_space(target,depth,space);
  gs_enable_framebuffer_srgb(srgb);
  gs_blend_state_pop();
@@ -255,7 +255,7 @@ QJsonObject QuickPanelBridge::snapshot(const QString &blockReason) const {
  auto add=[&](QWidget *widget,QString id,QString type){QJsonObject item=rect(QRectF(widget->mapTo(d.badge_,QPoint()),widget->size()));item["id"]=id;item["type"]=type;return item;};
  auto finite=[](double value)->QJsonValue{return std::isfinite(value)?QJsonValue(value):QJsonValue();};
  auto point=[&](double x,double y){return QJsonArray{x,finite(y)};};
- if(d.stats_->isVisibleTo(d.badge_)){auto c=add(d.stats_,"stats","stats");QJsonArray rows;for(int i=0;i<SentinelDock::StatCount;++i)if(!d.statIcons_[i]->isHidden()){auto box=[&](QWidget *w){return rect(QRectF(w->mapTo(d.stats_,QPoint()),w->size()));};const double r=d.metricRisk(i);const bool flash=preview && i==d.glowPreviewMetric_;QJsonObject row{{"icon",d.statDefinitions_[i].icon},{"label",d.statNames_[i]->text()},{"value",d.statValues_[i]->text()},{"iconRect",box(d.statIcons_[i])},{"nameRect",box(d.statNames_[i])},{"valueRect",box(d.statValues_[i])},{"color",color(r>=0?d.warningColor(r):colors.color(QPalette::WindowText))},{"flash",flash},{"flashColor",color(d.warningColor(d.glowPreviewRisk_))},{"names",!d.statNames_[i]->isHidden()},{"values",!d.statValues_[i]->isHidden()}};rows<<row;}c["rows"]=rows;cards<<c;}
+ if(d.stats_->isVisibleTo(d.badge_)){auto c=add(d.stats_,"stats","stats");QJsonArray rows;for(int i=0;i<LookoutDock::StatCount;++i)if(!d.statIcons_[i]->isHidden()){auto box=[&](QWidget *w){return rect(QRectF(w->mapTo(d.stats_,QPoint()),w->size()));};const double r=d.metricRisk(i);const bool flash=preview && i==d.glowPreviewMetric_;QJsonObject row{{"icon",d.statDefinitions_[i].icon},{"label",d.statNames_[i]->text()},{"value",d.statValues_[i]->text()},{"iconRect",box(d.statIcons_[i])},{"nameRect",box(d.statNames_[i])},{"valueRect",box(d.statValues_[i])},{"color",color(r>=0?d.warningColor(r):colors.color(QPalette::WindowText))},{"flash",flash},{"flashColor",color(d.warningColor(d.glowPreviewRisk_))},{"names",!d.statNames_[i]->isHidden()},{"values",!d.statValues_[i]->isHidden()}};rows<<row;}c["rows"]=rows;cards<<c;}
  if(d.badgeText_->isVisibleTo(d.badge_)){auto c=add(d.badgeText_,"alert","alert");c["html"]=d.badgeText_->text();cards<<c;}
  scene["hasThumbnail"]=d.previewCard_->isVisibleTo(d.badge_);if(scene["hasThumbnail"].toBool()){auto c=add(d.previewCard_,"thumbnail","thumbnail");c["preview"]=rect(QRectF(d.preview_->mapTo(d.previewCard_,QPoint()),d.preview_->size()));c["alertIcon"]=!d.alertIcon_->isHidden();QString role=d.alertIcon_->property("alertRole").toString();if(role=="record")role="recording";else if(role=="camera")role="virtual-camera";c["alertRole"]=role;c["alertColor"]=color(d.alertIcon_->property("alertColor").value<QColor>());cards<<c;}
  if(d.activeIcons_->isVisibleTo(d.badge_)){auto c=add(d.activeIcons_,"active-icons","icons");QJsonArray icons;const auto glyphs=d.activeIcons_->glyphs();const auto ids=d.activeIcons_->roles();for(int i=0;i<glyphs.size();++i){QString role=ids.value(i);role.remove("alert:");if(role=="camera")role="virtual-camera";else if(role=="bitrate")role="graphs";icons<<QJsonObject{{"icon",role},{"color",color(glyphs[i].color)},{"label",d.activeIcons_->toolTip()},{"flash",d.activeIcons_->freshAlerts_.contains(glyphs[i].alertId)}};}c["icons"]=icons;cards<<c;}

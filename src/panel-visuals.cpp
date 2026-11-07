@@ -3,7 +3,7 @@
 #include <QPainterPath>
 #include <algorithm>
 #include <cmath>
-namespace SentinelVisuals {
+namespace LookoutVisuals {
 QPalette panelPalette(const QPalette &native,int design,bool dark){
  design=std::clamp(design,0,8);if(!design)return native;QPalette result=native;
  const char *tops[]={"","#353747","#393344","#242232","#49414f","#284459","#102018","#f6f7fa"};

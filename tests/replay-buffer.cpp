@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <cmath>
 void check(bool yes,const char *message){if(!yes){std::fprintf(stderr,"FAIL: %s\n",message);std::exit(1);}}
-int main(int argc,char **argv){QApplication app(argc,argv);SentinelTelemetry::ReplayTracker tracker;
+int main(int argc,char **argv){QApplication app(argc,argv);LookoutTelemetry::ReplayTracker tracker;
  tracker.reset(10,0);tracker.append(0,1000,false);check(!tracker.sample().known,"waits for a decodable keyframe");
  for(int second=0;second<=30;++second){tracker.append(second*1000000LL,1000,second%2==0);const auto sample=tracker.sample();check(sample.known && sample.percent>=0 && sample.percent<=100,"real packet history yields bounded fill");if(second>12)check(sample.seconds<=10 && sample.seconds>=8,"rolling duration evicts complete old GOPs");}
  tracker.reset(60,5000);for(int i=0;i<20;++i)tracker.append(i*1000000LL,1000,true);auto fill=tracker.sample();check(fill.bytes<=5000 && fill.bytes>=3000 && fill.limitBytes==5000 && fill.limitSeconds==60,"memory limit governs fill before duration limit");check(fill.percent==100*double(fill.bytes)/5000,"fill respects the limiting resource");

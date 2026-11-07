@@ -10,7 +10,7 @@ target_compile_definitions(lookout-ui PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_compile_options(lookout-ui PRIVATE /utf-8)
 target_link_libraries(lookout-ui PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::Svg d3d11 dxgi dxguid user32 dwmapi comdlg32 coremessaging windowsapp)
 set_target_properties(lookout-ui PROPERTIES WIN32_EXECUTABLE TRUE)
-install(TARGETS lookout-ui RUNTIME DESTINATION obs-sentinel/ui)
+install(TARGETS lookout-ui RUNTIME DESTINATION lookout/ui)
 
 include(CTest)
 if(BUILD_TESTING)

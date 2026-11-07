@@ -25,17 +25,17 @@ class QuickPanelBridge;
 class QPushButton;
 struct os_cpu_usage_info;
 
-class SentinelDock final : public QWidget {
+class LookoutDock final : public QWidget {
 public:
- explicit SentinelDock(const QString &settings);
- ~SentinelDock() override;
+ explicit LookoutDock(const QString &settings);
+ ~LookoutDock() override;
  void openSettings();
  void enableQuickRenderer(const QString &executable);
  QSize sizeHint() const override;
 protected:
  void resizeEvent(QResizeEvent *) override;
 private:
- friend struct SentinelTestAccess;
+ friend struct LookoutTestAccess;
  friend class QuickPanelBridge;
  QuickPanelBridge *quick_=nullptr;
  bool quickVisible_=false;
@@ -93,13 +93,13 @@ private:
  HistoryGraphs *graphs_;
  BitrateCard *bitrates_;
  ReplayCard *replay_;
- SentinelTelemetry::ReplayTracker replayTracker_;
+ LookoutTelemetry::ReplayTracker replayTracker_;
  obs_output_t *replayOutput_=nullptr;
  bool replayActive_=false;
  void updateReplay();
  void detachReplay();
  static void replayPacket(obs_output_t*,encoder_packet*,encoder_packet_time*,void*);
- SentinelTelemetry::BitrateSampler recordingSampler_,streamingSampler_;
+ LookoutTelemetry::BitrateSampler recordingSampler_,streamingSampler_;
  std::optional<double> recordingBitrate_,streamingBitrate_;
  void updateBitrateCard();
  bool thumbnailEnabled() const;
@@ -179,7 +179,7 @@ private:
  std::optional<double> cpuUsage_;
  quint64 residentBytes_=0;
  bool recordingPaused_=false;
- SentinelTelemetry::RecordingSpaceEstimate recordingSpace_;
+ LookoutTelemetry::RecordingSpaceEstimate recordingSpace_;
  QTimer transformTimer_,cardLayoutTimer_;
  bool editHidden_=false;
  bool editMode_=false, placing_=false, dragging_=false,resizing_=false,transformChanged_=false;
@@ -209,7 +209,7 @@ private:
  bool recordingActive_=false, streamingActive_=false, cameraActive_=false;
  static constexpr int HotkeyCount=8;
  obs_hotkey_id keys_[HotkeyCount];
- struct Key { SentinelDock *self; int action; } keyData_[HotkeyCount];
+ struct Key { LookoutDock *self; int action; } keyData_[HotkeyCount];
  QThreadPool pool_;
  std::mutex mutex_;
  bool checking_ = false, resultReady_ = false;

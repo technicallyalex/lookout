@@ -3,7 +3,7 @@
 #include <QColor>
 #include <QPainter>
 #include <QWidget>
-namespace SentinelVisuals {
+namespace LookoutVisuals {
 constexpr int PanelRadius=8;
 constexpr double BorderWidth=1.0;
 constexpr int PreviewRadius=8;

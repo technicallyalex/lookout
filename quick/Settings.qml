@@ -317,7 +317,7 @@ Control {
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
                         text: "lookout " + (root.state.version || "") + "\n" + (root.state.build || "") +
-                              "\n\nRelease Candidate 1"
+                              "\n\nRelease Candidate 2"
                     }
                     Button {
                         visible: root.page === 7

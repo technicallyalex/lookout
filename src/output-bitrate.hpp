@@ -3,7 +3,7 @@
 #include <QtGlobal>
 #include <optional>
 
-namespace SentinelTelemetry {
+namespace LookoutTelemetry {
 // Measures actual output throughput from OBS's cumulative byte counter. The
 // caller supplies a stable output identity and a monotonic timestamp in ms.
 class BitrateSampler {

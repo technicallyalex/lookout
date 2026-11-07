@@ -146,14 +146,14 @@ About shows the build version and links to GitHub Releases for downloads and rel
 
 ## Build, installation and QA
 
-Close OBS and run **install-lookout-1.0.0-rc.1.exe**. Start OBS, then open
+Close OBS and run **install-lookout-1.0.0-rc.2.exe**. Start OBS, then open
 **Docks > lookout**. The installer verifies and replaces only the lookout plugin
 folder. Saved settings, hotkeys, presets, and the separate Recording Folder dock
 stay in place. There is no separate Qt installation or download on first run.
 
-For portable installation, extract the `obs-sentinel` folder from the ZIP and
+For portable installation, extract the `lookout` folder from the ZIP and
 place the whole folder under `C:/ProgramData/obs-studio/plugins/` with OBS closed.
-Keep its `ui` folder beside `obs-sentinel.dll`. A DLL-only copy is incomplete.
+Keep its `ui` folder beside `lookout.dll`. A DLL-only copy is incomplete.
 
 Build the native integration and isolated QML renderer with their own SDKs:
 

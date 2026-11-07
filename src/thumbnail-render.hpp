@@ -4,7 +4,7 @@
 #include <obs.h>
 #include <algorithm>
 
-namespace SentinelThumbnail {
+namespace LookoutThumbnail {
 // Draw the same OBS program image for a native display or a shared GPU target.
 inline void drawProgram(uint32_t width, uint32_t height, const obs_video_info &video)
 {

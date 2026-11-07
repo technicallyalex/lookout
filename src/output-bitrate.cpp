@@ -2,7 +2,7 @@
 #include "output-bitrate.hpp"
 #include <cmath>
 
-namespace SentinelTelemetry {
+namespace LookoutTelemetry {
 void BitrateSampler::reset(){
  identity_=0;baselineBytes_=lastSeenBytes_=0;baselineMs_=lastSeenMs_=0;
  initialized_=false;lastRate_.reset();

@@ -3,7 +3,7 @@
 #include <cstdio>
 #include <cmath>
 #include <cstdlib>
-using namespace SentinelLayout;
+using namespace LookoutLayout;
 static void check(bool condition,const char *message){if(!condition){std::fprintf(stderr,"FAIL: %s\n",message);std::exit(1);}}
 int main(){
  const QRect screen(0,0,1920,1080),neighbor(100,100,100,100);
