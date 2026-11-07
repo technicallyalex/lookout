@@ -1,0 +1,1 @@
+<RCC><qresource prefix="/quick"><file>Main.qml</file><file>Graph.qml</file><file>Glyph.qml</file><file>Settings.qml</file><file>DockSettings.qml</file><file>BrandMark.qml</file><file alias="cycle.png">../data/branding/lookout-cycle.png</file><file>SettingsField.qml</file></qresource></RCC>
