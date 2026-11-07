@@ -1,6 +1,14 @@
-# lookout
+<h1 align="center">
+  <img src="data/branding/lookout-light.svg" width="128" height="128" alt="Daytime lookout logo with a red tally light">
+  <br>
+  lookout
+</h1>
 
 An OBS plugin with customizable overlays to show the Preview, statics, graphs, and alerts while gaming.  Primarily designed for folks using OBS with a single monitor setup, lookout gives you a real-time look at what OBS is doing when it's hidden behind a game or other full screen applications.  It features rich customization, including the option to hide it from your OBS preview, recordings, and streams.
+
+![lookout overlay with a scene thumbnail, a stats card, and a chart comparing recording and streaming bitrate](docs/images/overlay.png)
+
+*Example overlay with a demo scene and sample OBS metrics.*
 
 ## Features
 
@@ -10,6 +18,19 @@ An OBS plugin with customizable overlays to show the Preview, statics, graphs, a
 - **Make it fit your setup.** Move and resize cards, snap them to each other or the screen edges, and save layouts as presets. Follow your OBS theme or pick a color palette, then adjust chart styles, opacity, and blur. Pick Instant, Fade, Flash, Slide, Blur, or Fall for show and hide transitions. In Fall mode, cards bounce off each other and the display edges as they exit.
 - **Control it from OBS.** Use the compact icon dock to show or hide panels, cycle positions and presets, or change the display mode. Assign lookout shortcuts through OBS’s built-in hotkey system.
 - **Designed for low overhead.** The thumbnail uses a shared GPU texture and pauses live frame transfers when hidden. The overlay runs outside the game process.
+
+<details>
+<summary>Panels and alert settings</summary>
+
+**Panels** lets you choose which stats to show and set each graph to Off, Mini, or Full.
+
+![Panels settings with thumbnail controls, individual stat toggles, and graph size selectors](docs/images/panel-settings.png)
+
+**Alerts** lets you set thresholds, preview each alert, and adjust the glow around the affected card.
+
+![Alerts settings with trigger thresholds, preview buttons, delivery options, and glow controls](docs/images/alert-settings.png)
+
+</details>
 
 ## Installation
 
