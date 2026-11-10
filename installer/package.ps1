@@ -31,12 +31,20 @@ Check-Native 'Qt runtime staging'
 Get-ChildItem -LiteralPath $CrtDir -Filter '*.dll' -File | Copy-Item -Destination $ui
 [IO.File]::WriteAllText((Join-Path $ui 'qt.conf'),"[Paths]`nPrefix=.`nPlugins=.`nQmlImports=qml`n",$encoding)
 Copy-Item -LiteralPath (Join-Path $project 'README.md'),(Join-Path $project 'DEVELOPMENT.md') -Destination $payload
+$readmeAssets = 'data/branding/lookout-light.svg', 'data/branding/lookout-wordmark-light.png',
+    'data/branding/lookout-wordmark-dark.png', 'docs/images/overlay.png',
+    'docs/images/panel-settings.png', 'docs/images/alert-settings.png'
+foreach ($asset in $readmeAssets) {
+    $destination = Join-Path $payload $asset
+    New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $project $asset) -Destination $destination
+}
 Copy-Item -LiteralPath (Join-Path $project 'LICENSE'),(Join-Path $PSScriptRoot 'THIRD-PARTY-NOTICES.md') -Destination $payload
 New-Item -ItemType Directory -Path (Join-Path $ui 'licenses') | Out-Null
 foreach ($name in 'LGPL-3.0-only.txt','GPL-3.0-only.txt','GPL-2.0-only.txt') { Copy-Item -LiteralPath (Join-Path $QtLicenseDir $name) -Destination (Join-Path $ui 'licenses') }
 $manifest = [ordered]@{
     version = $Version
-    build = '2026-11-07-lookout-cleanup'
+    build = '2026-11-10-rc2'
     builtUtc = [DateTime]::UtcNow.ToString('o')
     dllSha256 = (Get-FileHash -LiteralPath (Join-Path $payload 'lookout.dll')).Hash
     rendererSha256 = (Get-FileHash -LiteralPath (Join-Path $ui 'lookout-ui.exe')).Hash

@@ -26,16 +26,19 @@ int main(){
   const int thumbnail=metrics-16;
   const auto stack=groupedWidths(1920,metrics+16,thumbnail,24,false,true,true);
   const auto side=groupedWidths(1920,metrics+16,thumbnail,24,true,true,true);
-  check(side.alongside && side.metrics==stack.metrics && side.thumbnail==stack.thumbnail,
-        "all scale presets preserve both card widths when moving the thumbnail beside metrics");
+  check(side.alongside && side.metrics==stack.metrics && side.thumbnail==stack.thumbnail &&
+        stack.thumbnail+16==stack.metrics,"the thumbnail matches the other cards in both placements");
   check(side.window==side.metrics+side.thumbnail+32+24,"side-by-side reserves the configured gap and padding");
  }
  const auto constrained=groupedWidths(640,480,320,24,true,true,true);
- check(constrained.alongside && constrained.window==640 && constrained.metrics==464 && constrained.thumbnail==120,
-       "narrow displays shrink the preview before reducing metrics");
- const auto narrow=groupedWidths(576,480,320,24,true,true,true);
- check(!narrow.alongside && narrow.metrics==464 && narrow.thumbnail==320,"narrow displays stack cards when the preview would be too small");
+ check(!constrained.alongside && constrained.window==480 && constrained.metrics==464 &&
+       constrained.thumbnail+16==constrained.metrics,"narrow displays stack equally wide cards");
  const auto videoOnly=groupedWidths(640,480,800,24,true,false,true);
  check(!videoOnly.alongside && videoOnly.window==640 && videoOnly.thumbnail==608,"thumbnail-only mode fits inside the screen");
+ const auto compactStack=groupedWidths(640,56,240,8,false,true,true,false);
+ const auto compactSide=groupedWidths(640,56,240,8,true,true,true,false);
+ check(compactStack.window==272 && compactStack.metrics==40 && compactStack.thumbnail==240 &&
+       compactSide.alongside && compactSide.window==320 && compactSide.metrics==40 && compactSide.thumbnail==240,
+       "compact icon cards keep their own width without shrinking the thumbnail or adding a gap");
  std::puts("PASS: snapping, collision spacing, screen bounds, and size presets");
 }

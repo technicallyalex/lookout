@@ -9,6 +9,7 @@ RowLayout {
     required property var state
     required property var api
     readonly property var current: spec.stateKey ? state[spec.stateKey] : values[spec.key]
+    opacity: spec.dimWhenUnfocused && !spin.activeFocus ? 0.5 : 1
     Layout.minimumHeight: field.spec.kind === "preview" ? 32 : 0
     spacing: 14
 
@@ -40,47 +41,12 @@ RowLayout {
             wrapMode: Text.WordWrap
         }
     }
-    Switch {
-        id: settingSwitch
+    SettingsSwitch {
         visible: field.spec.kind === "toggle"
         enabled: !field.spec.disabled
         checked: !!field.current
-        implicitWidth: implicitIndicatorWidth + leftPadding + rightPadding
-        rightPadding: 0
+        dark: !!field.state.dark
         Accessible.name: field.spec.label || ""
-        indicator: Rectangle {
-            id: track
-            implicitWidth: 40
-            implicitHeight: 22
-            x: settingSwitch.leftPadding + (settingSwitch.availableWidth - width) / 2
-            y: settingSwitch.topPadding + (settingSwitch.availableHeight - height) / 2
-            radius: height / 2
-            color: settingSwitch.checked ? settingSwitch.palette.highlight :
-                Qt.tint(settingSwitch.palette.window, field.state.dark ? "#42ffffff" : "#61000000")
-            opacity: settingSwitch.enabled ? 1 : 0.5
-
-            Rectangle {
-                anchors.fill: parent
-                anchors.margins: -3
-                visible: settingSwitch.visualFocus
-                color: "transparent"
-                border.color: settingSwitch.palette.highlight
-                radius: height / 2
-            }
-            Rectangle {
-                width: track.height - 6
-                height: width
-                x: 3 + settingSwitch.visualPosition * (track.width - width - 6)
-                anchors.verticalCenter: parent.verticalCenter
-                radius: width / 2
-                color: "#ffffff"
-                border.color: "#26000000"
-                Behavior on x {
-                    enabled: !settingSwitch.pressed
-                    NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
-                }
-            }
-        }
         onToggled: {
             if (field.spec.stateKey) field.api.setting(field.spec.key, checked);
             else field.api.setting("set", checked, field.spec.key);

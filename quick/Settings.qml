@@ -20,6 +20,7 @@ Control {
     implicitWidth: 1080
     implicitHeight: Math.ceil(Math.max(sidebar.implicitHeight + 24, heading.implicitHeight + 34 + pageBody.implicitHeight))
     readonly property var navigation: ["Overlay", "Panels", "Appearance", "Placement", "Alerts", "Shortcuts", "Dock", "About"]
+    readonly property var visibilityOptions: ["On", "Active", "Off"]
     palette.window: pageColor
     palette.base: pageColor
     palette.button: surface
@@ -66,14 +67,21 @@ Control {
         case 1: return [
             group("Thumbnail", [
                 toggle("thumbnail","Show thumbnail"),
+                choice("thumbnailPosition","Thumbnail placement",
+                       ["Above metrics","Below metrics","Left of metrics","Right of metrics"],
+                       null,v.independentCards && !v.iconStrip),
                 {kind:"toggle",key:"showAlertIcon",label:"Show alert symbol on thumbnail",
                  disabled:!v.thumbnail,thumbnailPreview:true}]),
-            group("Stats", [
-                choice("presentation","Display mode",state.displayModeLabels || [],state.displayModeIds || []),
+            group("Stats and icons", [
+                toggle("textStats","Show text stats"),
+                Object.assign(choice("iconVisibility","Icons",visibilityOptions),
+                    {note:"Active shows icons for running OBS outputs and their related metrics."}),
                 stat("recording"),stat("streaming"),stat("camera","virtual-camera"),stat("replay"),
                 stat("storage"),stat("encoder"),stat("network"),stat("bitrate","graphs","showBitrate"),
                 stat("cpu"),stat("memory"),stat("disk-time")]),
             group("Graphs", [
+                Object.assign(choice("graphVisibility","Show graphs",visibilityOptions),
+                    {note:"Active shows selected graphs while their related OBS output is running."}),
                 graph("storage"),graph("encoder"),graph("network"),graph("cpu"),
                 graph("memory"),graph("disk-time"),graph("bitrate"),graph("replay")]),
             group("History", [
@@ -85,7 +93,9 @@ Control {
                 choice("chartLines","Chart line design",["Line","Filled area","Stepped","Line with grid"],["line","area","stepped","grid"]),
                 choice("chartDetail","Chart detail",["Full info","Minimal"]),
                 {kind:"choice",key:"logoTheme",label:"Appearance",options:["System","Light","Dark"],
-                 disabled:v.panelDesign === "obs",note:v.panelDesign === "obs" ? "Uses the theme selected in OBS." : ""}]),
+                 disabled:v.panelDesign === "obs",
+                 note:v.panelDesign === "obs" ? "Following OBS (" + (state.dark ? "Dark" : "Light") +
+                     "). Choose another Colors preset to change appearance." : ""}]),
             group("Panel effects", [number("backgroundOpacity","Card opacity (%)",0,100),
                 number("blurAmount","Blur amount (%)",0,100)])];
         case 3: return [
@@ -94,15 +104,17 @@ Control {
                      note:state.editing ? "Drag a card to move it or pull its corner grip to resize it." : "" },
                     choice("monitor","Display",state.monitors || []),
                     choice("corner","Anchor corner",["Top left","Top right","Bottom left","Bottom right"]),
-                    choice("thumbnailPosition","Thumbnail placement",["Above metrics","Below metrics","Left of metrics","Right of metrics"],null,v.independentCards),
                     toggle("independentCards","Move cards individually","",v.iconStrip),
                     {kind:"command",key:"resetPosition",label:"Reset position",alignRight:true}]),
                 group("Scale",[
                     {kind:"sizes",key:"panelScale",options:["Small","Normal","Large","Extra large","Custom"]},
-                    number("customSizePercent","Custom scale (%)",45,300)]),
+                    Object.assign(number("customSizePercent","Custom scale (%)",45,300),
+                        {dimWhenUnfocused:v.panelScale !== 4})]),
                 group("Precision Placement",[
                 number("offsetX","Horizontal inset (px)",0,10000),number("offsetY","Vertical inset (px)",0,10000),
-                number("panelWidth","Metrics column width (px)",128,960),number("thumbnailWidth","Thumbnail width (px)",80,800),
+                number("panelWidth","Metrics column width (px)",128,960),
+                Object.assign(number("thumbnailWidth","Thumbnail width (px)",80,800),
+                    {note:"Used when shown alone, with icons only, or with independent cards."}),
                 number("cardSpacing","Card spacing (px)",0,64),number("snapDistance","Snap distance (px)",0,64),
                 toggle("snapCards","Snap to other cards"),toggle("snapScreen","Snap to display edges")])];
         case 4: return [
@@ -306,6 +318,7 @@ Control {
                             controller: root.controller
                             options: root.state.dockOptions || []
                             order: root.state.dockOrder || []
+                            showLabels: !!root.state.dockLabels
                             surface: root.surface
                             edge: root.edge
                             ink: root.ink

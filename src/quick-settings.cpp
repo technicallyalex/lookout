@@ -137,11 +137,11 @@ void QuickPanelBridge::publishSettings()
  values["panelTransition"]=panelTransition();
  values["chartLines"]=chartLines();
  values["chartDetail"]=chartDetail();
- values["presentation"]=dock.displayMode();
+ values["textStats"]=dock.textStatsEnabled();
+ values["iconVisibility"]=dock.iconVisibility();
+ values["graphVisibility"]=dock.graphVisibility();
  for(const auto &metric:HistoryGraphs::metrics)values[QString("graph/")+metric.id]=dock.graphMode(metric.id);
  for(const auto *id:dock.outputGraphIds_)values[QString("graph/")+id]=dock.graphMode(id);
- QJsonArray modeLabels,modeIds;
- for(const auto &mode:dock.displayModes_){modeLabels.append(QString::fromUtf8(mode.label));modeIds.append(mode.id);}
  values["iconStrip"]=dock.iconStripMode();
  values["thumbnail"]=dock.thumbnailEnabled();
  values["glowWarningColor"]=dock.warningColor(0).name();
@@ -171,8 +171,8 @@ void QuickPanelBridge::publishSettings()
  if((obsPalette.color(QPalette::Window).lightness()<128)!=obs_frontend_is_theme_dark())
   obsPalette.setColor(QPalette::Window,obs_frontend_is_theme_dark()?QColor("#25272b"):QColor("#f1f2f4"));
  const QJsonObject state{{"values",values},{"monitors",monitors},{"presets",presets},{"shortcuts",shortcuts},
-  {"displayModeLabels",modeLabels},{"displayModeIds",modeIds},{"statLabels",statLabels},
-  {"dockOptions",dockOptions},{"dockOrder",dockOrder},
+  {"statLabels",statLabels},
+  {"dockOptions",dockOptions},{"dockOrder",dockOrder},{"dockLabels",dock.dockShowsLabels()},
   {"editing",dock.editMode_},{"hasAlerts",dock.alertActive_ || dock.sessionNotice_},
   {"hasPreview",dock.glowPreviewUntil_>dock.glowClock_.elapsed()},
   {"thumbnailAlertPreview",dock.thumbnailAlertPreview_.isActive()},
@@ -194,8 +194,15 @@ void QuickPanelBridge::settingsCommand(const QJsonObject &message)
  const auto value=message["value"];
  const QString key=message["key"].toString();
  auto &settings=dock.settings_;
- if(action=="dockButton" && value.isString()){
-  dock.editDockOrder(key,value.toString());
+ if(action=="dockLabels" && value.isBool()){
+  dock.setDockLabels(value.toBool());
+  publishSettings();
+  return;
+ }
+ if(action=="dockButton"){
+  if(value.isString())dock.editDockOrder(key,value.toString());
+  else if(value.isDouble())dock.editDockOrder(key,"move",value.toInt(-1));
+  else return;
   publishSettings();
   return;
  }
@@ -256,8 +263,14 @@ void QuickPanelBridge::settingsCommand(const QJsonObject &message)
   else dock.removePreset(name);
  }
  else if(action=="set"){
-  if(key=="presentation"){
-   dock.setDisplayMode(value.toInt(-1));
+  if(key=="iconVisibility" || key=="graphVisibility"){
+   const int mode=value.toInt(-1);
+   if(mode<LookoutDock::VisibilityOn || mode>LookoutDock::VisibilityOff)return;
+   dock.setContentPreference(key,mode);
+   return;
+  }
+  else if(key=="textStats" && value.isBool()){
+   dock.setContentPreference(key,value.toBool());
    return;
   }
   else if(key.startsWith("graph/") && value.isDouble()){
@@ -290,10 +303,7 @@ void QuickPanelBridge::settingsCommand(const QJsonObject &message)
    settings.setValue(key,value.toBool());
    if(value.toBool() && (key=="showBitrate" || key.startsWith("iconVisible/")))
     dock.metricsVisible_=true;
-   if(key=="storage" || key=="encoder" || key=="network"){
-    dock.storageAlarm_=dock.storageFull_=dock.storageUnavailable_=false;
-    dock.encoderAlarm_=dock.networkAlarm_=dock.reconnectAlarm_=false;
-   }
+   dock.resetAlertRule(key);
    if(key=="untilDismiss"){
     if(value.toBool())dock.dismiss_.stop();
     else if(dock.alertActive_ || dock.sessionNotice_)

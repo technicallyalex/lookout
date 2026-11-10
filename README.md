@@ -16,16 +16,16 @@ An OBS plugin with customizable overlays to show the Preview, statics, graphs, a
 ## Features
 
 - **Live OBS thumbnail.** See what OBS is sending to your recording or stream. Show the thumbnail alongside any display mode and place it above, below, or beside your metrics.
-- **Stats, graphs, and compact icons.** Track recording, streaming, virtual camera, OBS CPU and memory usage, available disk space, estimated time until the recording drive fills, skipped frames due to encoding lag, dropped frames over the network, bitrate, and estimated replay buffer fill. Custom mode puts all selected stats in one card and lets you choose Off, Mini, or Full for each graph. Icons and Active icons give you a compact view.
+- **Stats, graphs, and compact icons.** Track recording, streaming, virtual camera, OBS CPU and memory usage, available disk space, estimated time until the recording drive fills, skipped frames due to encoding lag, dropped frames over the network, bitrate, and estimated replay buffer fill. Text stats share one card. Set icons and graphs independently to On, Active, or Off, and choose Off, Mini, or Full for each graph.
 - **Alerts you can act on.** Set thresholds for low recording storage, encoder overload, and dropped stream frames. Get notified about connection interruptions and when recording, streaming, or the virtual camera starts or stops. Preview alerts in settings, tune the glow on the affected card, and choose whether alerts stay until dismissed.
 - **Make it fit your setup.** Move and resize cards, snap them to each other or the screen edges, and save layouts as presets. Follow your OBS theme or pick a color palette, then adjust chart styles, opacity, and blur. Pick Instant, Fade, Flash, Slide, Blur, or Fall for show and hide transitions. In Fall mode, cards bounce off each other and the display edges as they exit.
-- **Control it from OBS.** Use the compact icon dock to show or hide panels, cycle positions and presets, or change the display mode. Assign lookout shortcuts through OBS’s built-in hotkey system.
+- **Control it from OBS.** Customize the dock with icons or labeled buttons to show or hide panels, cycle positions and presets, or change the display mode. Assign lookout shortcuts through OBS’s built-in hotkey system.
 - **Designed for low overhead.** The thumbnail uses a shared GPU texture and pauses live frame transfers when hidden. The overlay runs outside the game process.
 
 <details>
 <summary>Panels and alert settings</summary>
 
-**Panels** lets you choose which stats to show and set each graph to Off, Mini, or Full.
+**Panels** lets you choose which stats and icons to show and set each graph to Off, Mini, or Full. Set **Icons** and **Show graphs** independently to **On**, **Active**, or **Off**. Active follows the related OBS output, and Off keeps your individual selections for later.
 
 ![Panels settings with thumbnail controls, individual stat toggles, and graph size selectors](docs/images/panel-settings.png)
 

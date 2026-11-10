@@ -65,11 +65,19 @@
 #endif
 namespace {
 constexpr int DockButtonSize=28, DockSpacing=4, DockMargin=4;
+constexpr int DockLabelPadding=40, DockLabelsMinimumWidth=100;
 const char *names[] = {"Lookout.ShowPanel","Lookout.HidePanel","Lookout.DisablePanel","Lookout.Preview","Lookout.ToggleStats","Lookout.ToggleCapture","Lookout.CycleDefaults","Lookout.CyclePresets"};
 const char *descriptions[] = {"lookout: Show Panel (persistent)","lookout: Hide Panel (alerts override)","lookout: Disable Panel (also disables alerts)","lookout: Toggle Thumbnail","lookout: Toggle Stats","lookout: Toggle Show in Recordings/Stream","lookout: Cycle Position (Defaults)","lookout: Cycle Position (Presets)"};
 QIcon uiIcon(const QString &role,std::optional<bool> darkMode={}){
  const QMap<QString,QString> names={{"status","show"},{"dismiss","hide"},{"record","recording"},{"stream","streaming"},{"camera","virtual-camera"}};const QString name=names.value(role,role);const bool dark=darkMode.value_or(obs_frontend_is_theme_dark());const QString path=":/lookout/icons/"+QString(dark?"dark/":"light/")+name+".svg";
  if(QFile::exists(path))return QIcon(path);return QApplication::style()->standardIcon(role=="dismiss"?QStyle::SP_DialogCloseButton:QStyle::SP_FileDialogDetailedView);
+}
+QString alertRole(const QString &title){
+ const auto name=title.toLower();
+ if(name.contains("storage") || name.contains("disk"))return "storage";
+ if(name.contains("encoder"))return "encoder";
+ if(name.contains("stream") || name.contains("network"))return "network";
+ return "alerts";
 }
 // Focused shortcut entry only; OBS continues to own global hotkey dispatch.
 class HotkeyEditor final : public QLineEdit {
@@ -327,7 +335,7 @@ LookoutDock::LookoutDock(const QString &file): settings_(file,QSettings::IniForm
  configureGraphs();
  badge_->setObjectName("lookoutPanel");badge_->installEventFilter(this);
 badgeText_->setObjectName("panelText");
- previewCard_=new QWidget(badge_);previewCard_->setObjectName("panelThumbnail");auto *previewLayout=new QVBoxLayout(previewCard_);previewLayout->setContentsMargins(8,8,8,8);previewLayout->setSpacing(0);preview_=new Preview(previewCard_);previewLayout->addWidget(preview_);preview_->setObjectName("panelPreview");
+ previewCard_=new QWidget(badge_);previewCard_->setObjectName("panelThumbnail");preview_=new Preview(previewCard_);preview_->setObjectName("panelPreview");
  alertIcon_=new QLabel(preview_);alertIcon_->setObjectName("thumbnailAlertIcon");alertIcon_->setAttribute(Qt::WA_NativeWindow);alertIcon_->setFixedSize(32,32);alertIcon_->setAttribute(Qt::WA_TransparentForMouseEvents);alertIcon_->hide();
  panelLayout_->addWidget(information_);panelLayout_->addWidget(previewCard_);preview_->hide();previewCard_->hide();
 
@@ -370,8 +378,10 @@ QStringList LookoutDock::defaultDockOrder(){
  return order;
 }
 QSize LookoutDock::sizeHint() const {
- const int rows=std::max(1,(int(dockOrder_.size())+2)/3);
- return QSize(100,2*DockMargin+rows*DockButtonSize+(rows-1)*DockSpacing);
+ const bool labels=dockShowsLabels() && !dockOrder_.isEmpty();
+ const int rows=std::max(1,labels?int(dockOrder_.size()):(int(dockOrder_.size())+2)/3);
+ const int width=labels?std::max(DockLabelsMinimumWidth,preferredDockButtonWidth()+2*DockMargin):100;
+ return QSize(width,2*DockMargin+rows*DockButtonSize+(rows-1)*DockSpacing);
 }
 void LookoutDock::applyDockOrder(const QStringList &order){
  dockOrder_.clear();
@@ -381,7 +391,7 @@ void LookoutDock::applyDockOrder(const QStringList &order){
  for(int i=1;i<dockOrder_.size();++i)setTabOrder(dockButtons_[dockOrder_[i-1]],dockButtons_[dockOrder_[i]]);
  layoutDockActions();updateGeometry();
 }
-void LookoutDock::editDockOrder(const QString &id,const QString &operation){
+void LookoutDock::editDockOrder(const QString &id,const QString &operation,int target){
  QStringList order=dockOrder_;
  if(operation=="reset")order=defaultDockOrder();
  else if(dockButtons_.contains(id)){
@@ -390,20 +400,48 @@ void LookoutDock::editDockOrder(const QString &id,const QString &operation){
   else if(operation=="remove" && index>=0)order.removeAt(index);
   else if(operation=="up" && index>0)order.swapItemsAt(index,index-1);
   else if(operation=="down" && index>=0 && index+1<order.size())order.swapItemsAt(index,index+1);
+  else if(operation=="move" && index>=0 && target>=0 && target<order.size())order.move(index,target);
  }
  if(order==dockOrder_)return;
  settings_.setValue("dockButtons",order);settings_.sync();
  applyDockOrder(order);
 }
+bool LookoutDock::dockShowsLabels() const {return settings_.value("dockLabels",false).toBool();}
+void LookoutDock::setDockLabels(bool show){
+ if(show==dockShowsLabels())return;
+ settings_.setValue("dockLabels",show);
+ settings_.sync();
+ layoutDockActions();
+ updateGeometry();
+}
+int LookoutDock::preferredDockButtonWidth() const {
+ int width=DockButtonSize;
+ if(dockShowsLabels())for(const auto &id:dockOrder_){
+  const auto *button=dockButtons_[id];
+  width=std::max(width,button->fontMetrics().horizontalAdvance(button->accessibleName())+DockLabelPadding);
+ }
+ return width;
+}
 void LookoutDock::layoutDockActions(){
  const int count=int(dockOrder_.size());
+ const bool labels=dockShowsLabels();
+ setMinimumWidth(labels && count>0?DockLabelsMinimumWidth:DockButtonSize+2*DockMargin);
  if(count==0){setMinimumHeight(2*DockMargin);return;}
- const int pitch=DockButtonSize+DockSpacing;
- const int columns=std::clamp((width()-2*DockMargin+DockSpacing)/pitch,1,count);
- const int left=(width()-(columns*pitch-DockSpacing))/2;
- for(int i=0;i<count;++i)dockButtons_[dockOrder_[i]]->move(left+(i%columns)*pitch,DockMargin+(i/columns)*pitch);
+ const int available=std::max(DockButtonSize,width()-2*DockMargin);
+ const int buttonWidth=std::min(available,preferredDockButtonWidth());
+ const int pitchX=buttonWidth+DockSpacing,pitchY=DockButtonSize+DockSpacing;
+ const int columns=std::clamp((available+DockSpacing)/pitchX,1,count);
+ const int left=(width()-(columns*pitchX-DockSpacing))/2;
+ for(int i=0;i<count;++i){
+  auto *button=dockButtons_[dockOrder_[i]];
+  const QString label=labels?button->fontMetrics().elidedText(button->accessibleName(),Qt::ElideRight,
+    std::max(0,buttonWidth-DockLabelPadding)):QString();
+  button->setText(label);
+  button->setFixedSize(buttonWidth,DockButtonSize);
+  button->move(left+(i%columns)*pitchX,DockMargin+(i/columns)*pitchY);
+ }
  const int rows=(count+columns-1)/columns;
- setMinimumHeight(2*DockMargin+rows*pitch-DockSpacing);
+ setMinimumHeight(2*DockMargin+rows*pitchY-DockSpacing);
 }
 void LookoutDock::updateIcons(){
  updateBranding();
@@ -453,6 +491,7 @@ void LookoutDock::event(obs_frontend_event e, void *data) {
   QMetaObject::invokeMethod(self,[self]{
    if(!self->ready_)return;
    self->updateIcons();
+   self->layoutDockActions();
    self->refreshPanel();
   },Qt::QueuedConnection);
   return;
@@ -483,18 +522,25 @@ void LookoutDock::place(QWidget *window,const QString &prefix){
  const bool showMetrics=!information_->isHidden();
  const bool showThumbnail=!previewCard_->isHidden();
  const int position=std::clamp(settings_.value("thumbnailPosition",0).toInt(),0,3);
- const int panelWidth=iconStripMode()?std::max(32,activeIcons_->sizeHint().width()+16):
-  std::clamp(settings_.value("panelWidth",520).toInt(),128,960);
+ const int thumbnailWidth=std::clamp(settings_.value("thumbnailWidth",320).toInt(),80,800);
+ int panelWidth=std::clamp(settings_.value("panelWidth",520).toInt(),128,960);
+ const bool compactIcons=iconStripMode() && badgeText_->isHidden();
+ if(iconStripMode()){
+  if(compactIcons)panelWidth=std::max(32,activeIcons_->maximumWidth()+16);
+  else if(showThumbnail)panelWidth=thumbnailWidth+32;
+ }
  const int spacing=panelLayout_->spacing();
- const auto widths=LookoutLayout::groupedWidths(r.width(),panelWidth,
-  std::clamp(settings_.value("thumbnailWidth",320).toInt(),80,800),spacing,
-  position>=2,showMetrics,showThumbnail);
+ const auto widths=LookoutLayout::groupedWidths(r.width(),panelWidth,thumbnailWidth,spacing,
+  position>=2,showMetrics,showThumbnail,!compactIcons);
  const int actualWidth=widths.window+2*halo;
  if(window->minimumWidth()!=actualWidth || window->maximumWidth()!=actualWidth)window->setFixedWidth(actualWidth);
  if(widths.alongside)panelLayout_->setDirection(position==2?QBoxLayout::RightToLeft:QBoxLayout::LeftToRight);
  else panelLayout_->setDirection(position==0 || position==2?QBoxLayout::BottomToTop:QBoxLayout::TopToBottom);
- panelLayout_->setAlignment(previewCard_,Qt::AlignTop);
- panelLayout_->setAlignment(information_,Qt::AlignTop);
+ const int corner=std::clamp(settings_.value(prefix+"corner",prefix.isEmpty()?1:3).toInt(),0,3);
+ const auto edge=corner%2?Qt::AlignRight:Qt::AlignLeft;
+ const auto columnAlignment=widths.alongside?Qt::AlignTop:Qt::AlignTop|edge;
+ panelLayout_->setAlignment(previewCard_,columnAlignment);
+ panelLayout_->setAlignment(information_,columnAlignment);
  if(showMetrics && information_->minimumWidth()!=widths.metrics)information_->setFixedWidth(widths.metrics);
  layoutStats(widths.metrics);
  // The hidden widget tree still needs to report the new size of restored rows.
@@ -502,15 +548,13 @@ void LookoutDock::place(QWidget *window,const QString &prefix){
  stats_->updateGeometry();
  bitrates_->updateGeometry();replay_->updateGeometry();activeIcons_->updateGeometry();
  auto *informationLayout=information_->layout();
+ informationLayout->setAlignment(activeIcons_,edge);
  informationLayout->invalidate();
  if(showThumbnail){
   const int infoHeight=!showMetrics || widths.alongside?0:spacing+
    (informationLayout->hasHeightForWidth()?informationLayout->totalHeightForWidth(widths.metrics):informationLayout->totalSizeHint().height());
   const int maxVideoHeight=std::max(1,r.height()-32-infoHeight);
-  const int width=std::min(widths.thumbnail,maxVideoHeight*16/9);
-  preview_->setFixedSize(width,std::max(1,width*9/16));
-  previewCard_->setFixedSize(width+16,preview_->height()+16);
-  updateAlertIcon();
+  layoutThumbnail(widths.thumbnail+16,std::min(widths.thumbnail,maxVideoHeight*16/9));
  }
  information_->updateGeometry();
  panelLayout_->invalidate();
@@ -521,7 +565,6 @@ void LookoutDock::place(QWidget *window,const QString &prefix){
  window->layout()->setGeometry(window->rect());
  informationLayout->setGeometry(information_->rect());
  statsLayout_->setGeometry(stats_->rect());
- const int corner=std::clamp(settings_.value(prefix+"corner",prefix.isEmpty()?1:3).toInt(),0,3);
  const int dx=std::max(0,settings_.value(prefix+"offsetX",24).toInt());
  const int dy=std::max(0,settings_.value(prefix+"offsetY",24).toInt());
  const int right=std::max(r.left(),r.right()-widths.window+1);
@@ -588,6 +631,48 @@ int LookoutDock::displayMode() const {
 LookoutDock::GraphMode LookoutDock::graphMode(const QString &id) const {
  return GraphMode(std::clamp(settings_.value("graph/"+id,0).toInt(),0,2));
 }
+LookoutDock::GraphMode LookoutDock::visibleGraphMode(const QString &id) const {
+ const auto mode=graphVisibility();
+ return mode==VisibilityOn || (mode==VisibilityActive && metricActive(id)) ? graphMode(id) : GraphOff;
+}
+LookoutDock::VisibilityMode LookoutDock::graphVisibility() const {
+ if(displayMode()!=0)return VisibilityOff;
+ return VisibilityMode(std::clamp(settings_.value("graphVisibility",VisibilityOn).toInt(),0,2));
+}
+LookoutDock::VisibilityMode LookoutDock::iconVisibility() const {
+ if(displayMode()==5)return VisibilityOn;
+ if(displayMode()==4)return VisibilityActive;
+ return VisibilityMode(std::clamp(settings_.value("iconVisibility",VisibilityOff).toInt(),0,2));
+}
+bool LookoutDock::textStatsEnabled() const {
+ return displayMode()==0 && settings_.value("textStats",true).toBool();
+}
+bool LookoutDock::metricActive(const QString &id) const {
+ if(id=="recording" || id=="storage")return recordingActive_;
+ if(id=="disk-time")return recordingActive_ && !recordingPaused_;
+ if(id=="streaming" || id=="network")return streamingActive_;
+ if(id=="camera")return cameraActive_;
+ if(id=="replay")return replayActive_;
+ if(id=="bitrate")return recordingActive_ || streamingActive_;
+ const bool encoding=recordingActive_ || streamingActive_ || replayActive_;
+ if(id=="encoder")return encoding;
+ if(id=="cpu" || id=="memory")return encoding || cameraActive_;
+ return false;
+}
+void LookoutDock::setContentPreference(const QString &key,const QVariant &value){
+ // Editing a compact preset starts from what it currently displays.
+ if(displayMode()!=0){
+  settings_.setValue("graphVisibility",graphVisibility());
+  settings_.setValue("iconVisibility",iconVisibility());
+  settings_.setValue("textStats",textStatsEnabled());
+  settings_.setValue("statsDisplay",0);
+ }
+ settings_.setValue(key,value);
+ const bool enabled=key=="textStats"?value.toBool():value.toInt()!=VisibilityOff;
+ if(enabled)metricsVisible_=true;
+ settings_.sync();
+ refreshPanel();
+}
 void LookoutDock::setDisplayMode(int mode){
  for(const auto &option:displayModes_)if(option.id==mode){
   settings_.setValue("statsDisplay",mode);
@@ -597,10 +682,12 @@ void LookoutDock::setDisplayMode(int mode){
   return;
  }
 }
-bool LookoutDock::iconStripMode() const {return displayMode()==4 || displayMode()==5;}
+bool LookoutDock::iconStripMode() const {
+ return !textStatsEnabled() && graphVisibility()==VisibilityOff && iconVisibility()!=VisibilityOff;
+}
 bool LookoutDock::graphsEnabled() const {
  return std::any_of(std::begin(HistoryGraphs::metrics),std::end(HistoryGraphs::metrics),
-  [this](const auto &metric){return graphMode(metric.id)!=GraphOff;});
+  [this](const auto &metric){return visibleGraphMode(metric.id)!=GraphOff;});
 }
 void LookoutDock::layoutStats(int){
  int position=0;
@@ -616,26 +703,41 @@ void LookoutDock::layoutStats(int){
  }
 }
 void LookoutDock::updateStatusIcons(){
- const bool enabled=iconStripMode() && metricsVisible_;QVector<StatusIconsCard::AlertIcon> icons;QStringList fingerprint;auto visible=[this](const QString &id){return metricEnabled(id);};
- auto append=[&](const QString &title,const QString &body,bool preview){QString role=title.contains("encoder",Qt::CaseInsensitive)?"encoder":title.contains("storage",Qt::CaseInsensitive) || title.contains("disk",Qt::CaseInsensitive)?"storage":title.contains("stream",Qt::CaseInsensitive) || title.contains("network",Qt::CaseInsensitive)?"network":"alerts";if(!preview && !visible(role))return;const int stat=role=="storage"?1:role=="encoder"?3:5;const double risk=preview?glowPreviewRisk_:metricRisk(stat);QColor color=title=="Stream reconnected"?badge_->palette().color(QPalette::WindowText):warningColor(risk>=0?risk:title.contains("running low",Qt::CaseInsensitive)?0:1);icons<<StatusIconsCard::AlertIcon{role,uiIcon(role,badge_->palette().color(QPalette::Window).lightness()<128),color,(preview?"Preview: ":QString())+title+": "+body};fingerprint<<role+color.name()+title;};
- if(enabled){for(auto it=alerts_.cbegin();it!=alerts_.cend();++it)append(it.key(),it.value(),false);if(glowPreviewUntil_>glowClock_.elapsed() && !previewAlertTitle_.isEmpty())append(previewAlertTitle_,previewAlertBody_,true);}
- QVector<StatusIconsCard::AlertIcon> statuses;const bool all=settings_.value("statsDisplay",0).toInt()==5;const bool dark=badge_->palette().color(QPalette::Window).lightness()<128;const QColor inactive=badge_->palette().color(QPalette::PlaceholderText),normal=badge_->palette().color(QPalette::WindowText);
- auto status=[&](QString id,QString icon,bool active,QColor color,QString label,bool always){if(enabled && visible(id) && (always || active))statuses<<StatusIconsCard::AlertIcon{id,uiIcon(icon,dark),active?color:inactive,label};};
- status("recording","record",recordingActive_,QColor("#ff4b55"),recordingActive_?"Recording active":"Recording stopped",all);
- if(all && enabled && visible("storage"))statuses<<StatusIconsCard::AlertIcon{"storage",uiIcon("storage",dark),normal,storageText_};
- status("streaming","stream",streamingActive_,QColor("#40baf0"),streamingActive_?"Streaming active":"Streaming offline",all);
- if(all && enabled){if(visible("encoder"))statuses<<StatusIconsCard::AlertIcon{"encoder",uiIcon("encoder",dark),normal,"Encoder"};if(visible("network"))statuses<<StatusIconsCard::AlertIcon{"network",uiIcon("network",dark),normal,networkText_};}
- status("camera","camera",cameraActive_,QColor("#b38bff"),cameraActive_?"Virtual camera active":"Virtual camera off",all);
- status("replay","replay",replayActive_,QColor("#65d8dc"),replayActive_?"Replay buffer active":"Replay buffer stopped",all);
- QStringList order;
- for(int i=0;i<StatCount;++i){
-  const auto &metric=statDefinitions_[i];order.append(metric.id);
-  if(i>=CpuStat && i<ReplayStat && all && enabled && visible(metric.id))
-   statuses<<StatusIconsCard::AlertIcon{metric.id,uiIcon(metric.icon,dark),normal,
-     QString::fromUtf8(metric.label.full)+": "+statValues_[i]->text()};
+ const auto mode=iconVisibility();
+ const bool enabled=mode!=VisibilityOff && metricsVisible_;QVector<StatusIconsCard::AlertIcon> icons;QStringList fingerprint;auto visible=[this](const QString &id){return metricEnabled(id);};
+ const auto palette=badge_->palette();
+ const bool dark=palette.color(QPalette::Window).lightness()<128;
+ auto append=[&](const QString &title,const QString &body,const QColor &color,bool preview){
+  const auto role=alertRole(title);
+  icons<<StatusIconsCard::AlertIcon{role,uiIcon(role,dark),color,(preview?"Preview: ":QString())+title+": "+body};
+  fingerprint<<role+color.name()+title;
+ };
+ if(enabled){
+  for(auto it=alerts_.cbegin();it!=alerts_.cend();++it)
+   if(it.key()!=lastAlertTitle_)append(it.key(),it->text,alertColor(it.key(),it->critical),false);
+  if(const auto latest=alerts_.constFind(lastAlertTitle_);latest!=alerts_.cend())
+   append(latest.key(),latest->text,alertColor(latest.key(),latest->critical),false);
+  if(glowPreviewUntil_>glowClock_.elapsed() && !previewAlertTitle_.isEmpty())
+   append(previewAlertTitle_,previewAlertBody_,alertColor(previewAlertTitle_,glowPreviewRisk_>=1),true);
  }
- std::stable_sort(statuses.begin(),statuses.end(),[&](const auto &a,const auto &b){return order.indexOf(a.id)<order.indexOf(b.id);});
+ QVector<StatusIconsCard::AlertIcon> statuses;
+ const QColor inactive=palette.color(QPalette::PlaceholderText),normal=palette.color(QPalette::WindowText);
+ if(enabled)for(int i=0;i<StatCount;++i){
+  const auto &metric=statDefinitions_[i];
+  const bool active=metricActive(metric.id);
+  if(!visible(metric.id) || (mode==VisibilityActive && !active))continue;
+  QColor color=normal;
+  switch(i){
+  case RecordingStat:color=active?QColor("#ff4b55"):inactive;break;
+  case StreamingStat:color=active?QColor("#40baf0"):inactive;break;
+  case CameraStat:color=active?QColor("#b38bff"):inactive;break;
+  case ReplayStat:color=active?QColor("#65d8dc"):inactive;break;
+  }
+  statuses<<StatusIconsCard::AlertIcon{metric.id,uiIcon(metric.icon,dark),color,
+    QString::fromUtf8(metric.label.full)+": "+statValues_[i]->text()};
+ }
  activeIcons_->setPersistentIcons(statuses);activeIcons_->setScale(panelScale());activeIcons_->setState(false,false,icons);const QString next=fingerprint.join("|");if(next!=iconFingerprint_ && !icons.isEmpty()){iconPop_->stop();activeIcons_->setPulse(0);iconPop_->start();}iconFingerprint_=next;
+ activeIcons_->setMaximumWidth(std::max(1,activeIcons_->sizeHint().width()));
 }
 void LookoutDock::updateStats(){
  auto percent=[](const QString &text){const int split=text.indexOf(QString::fromUtf8(" · "));const QString value=split>=0?text.mid(split+3):text;return value.contains('%')?value.section('%',0,0)+"%":value;};
@@ -688,17 +790,17 @@ void LookoutDock::refreshPanel(){
  const bool anyStatus=std::any_of(std::begin(statDefinitions_),std::end(statDefinitions_),
    [this](const auto &metric){return metricEnabled(metric.id);});
  const bool thumbnail=thumbnailDisplayed();preview_->setVisible(thumbnail);previewCard_->setVisible(thumbnail);updateAlertIcon();
- const bool thumbnailAlert=!thumbnailPreview && (alertActive_ || alertPreview) && thumbnail && (!showMetrics || !anyStatus || iconsOnly) && !alertIcon_->isHidden() && settings_.value("showAlertIcon",true).toBool();
- updateStats();updateStatusIcons();activeIcons_->setVisible(iconsOnly && showMetrics && activeIcons_->iconCount()>0);
- stats_->setVisible(!iconsOnly && anyStatus && (showMetrics || (previewing && !alertPreview)));
- replay_->setVisible(!iconsOnly && showMetrics && graphMode("replay")!=GraphOff);
- graphs_->setVisible(!iconsOnly && showMetrics && graphsEnabled() && !independentLayout_);
+ updateStats();updateStatusIcons();activeIcons_->setVisible(showMetrics && activeIcons_->iconCount()>0);
+ stats_->setVisible(textStatsEnabled() && anyStatus && (showMetrics || (previewing && !alertPreview)));
+ replay_->setVisible(showMetrics && visibleGraphMode("replay")!=GraphOff);
+ graphs_->setVisible(showMetrics && graphsEnabled() && !independentLayout_);
  for(int metric=0;metric<HistoryGraphs::Count;++metric)
-  graphViews_[metric]->setVisible(!iconsOnly && independentLayout_ && showMetrics && graphMode(HistoryGraphs::metrics[metric].id)!=GraphOff);
+  graphViews_[metric]->setVisible(independentLayout_ && showMetrics && visibleGraphMode(HistoryGraphs::metrics[metric].id)!=GraphOff);
  updateBitrateCard();
- QStringList callouts;for(auto it=alerts_.cbegin();it!=alerts_.cend();++it){QString detail=it.value().toHtmlEscaped();detail.replace("\n","<br/>");callouts<<"<b>"+it.key().toHtmlEscaped()+"</b><br/>"+detail;}
+ QStringList callouts;for(auto it=alerts_.cbegin();it!=alerts_.cend();++it){QString detail=it->text.toHtmlEscaped();detail.replace("\n","<br/>");callouts<<"<b>"+it.key().toHtmlEscaped()+"</b><br/>"+detail;}
  if(alertPreview)callouts<<"<b>Preview · "+previewAlertTitle_.toHtmlEscaped()+"</b><br/>"+previewAlertBody_.toHtmlEscaped();
- badgeText_->setText(callouts.join("<br/><br/>"));badgeText_->setVisible(!iconsOnly && !callouts.isEmpty() && !thumbnailAlert);
+ const bool compactAlert=displayMode()!=0 && !activeIcons_->isHidden() && activeIcons_->hasAlerts();
+ badgeText_->setText(callouts.join("<br/><br/>"));badgeText_->setVisible(!compactAlert && !callouts.isEmpty());
  bool infoVisible=false;for(auto *card:QVector<QWidget*>{stats_,replay_,bitrates_,graphs_,badgeText_,activeIcons_})infoVisible|=!card->isHidden();information_->setVisible(infoVisible);
  bool contentVisible=thumbnail || infoVisible;for(auto *view:graphViews_)contentVisible|=!view->isHidden();
  if(transitionPreview && !contentVisible){
@@ -716,7 +818,7 @@ void LookoutDock::notify(const QString &title,const QString &text,bool critical)
  if(!ready_ || panelMode()==2)return;
  if(title=="Session update"){sessionNotice_=true;if(settings_.value("untilDismiss",false).toBool())dismiss_.stop();else if(!alertActive_)dismiss_.start(settings_.value("seconds",6).toInt()*1000);refreshPanel();return;}
  if(!settings_.value("untilDismiss",false).toBool())alerts_.clear();
- alerts_.insert(title,text);lastAlertTitle_=title;lastAlertBody_=text;alertActive_=true;
+ alerts_.insert(title,{text,critical});lastAlertTitle_=title;alertActive_=true;
  if(settings_.value("untilDismiss",false).toBool())dismiss_.stop();
  else dismiss_.start(settings_.value("seconds",6).toInt()*1000);
  refreshPanel();
@@ -837,15 +939,6 @@ void LookoutDock::openSettings(){
  auto *behaviorForm=new QFormLayout;layout->addLayout(behaviorForm);auto *behavior=new QComboBox;behavior->setObjectName("panelMode");behavior->addItems({"Alerts only","Always visible","Disabled (including alerts)"});behavior->setCurrentIndex(panelMode());behaviorForm->addRow("Panel visibility",behavior);
  connect(behavior,&QComboBox::currentIndexChanged,this,[this](int value){settings_.setValue("panelMode",value);settings_.sync();refreshPanel();});
  option("showThumbnail","Show thumbnail",false);
- auto *presentation=new QComboBox;
- presentation->setObjectName("presentation");
- for(const auto &mode:displayModes_)presentation->addItem(mode.label,mode.id);
- presentation->setCurrentIndex(presentation->findData(displayMode()));
- auto *modeForm=new QFormLayout;
- modeForm->addRow("Display mode",presentation);layout->addLayout(modeForm);
- connect(presentation,&QComboBox::currentIndexChanged,this,[this,presentation](int){
-  setDisplayMode(presentation->currentData().toInt());
- });
  auto *metricControls=new QHBoxLayout;layout->addLayout(metricControls);
  auto *iconOptions=new QGroupBox("Stats");iconOptions->setObjectName("metrics");iconOptions->setToolTip("Controls which stats and icons are displayed. Configure notifications under Alerts.");metricControls->addWidget(iconOptions,1,Qt::AlignTop);auto *iconGrid=new QGridLayout(iconOptions);
  const Stat iconStats[]={RecordingStat,StorageStat,StreamingStat,EncoderStat,CameraStat,NetworkStat,ReplayStat,CpuStat,MemoryStat,DiskTimeStat};
@@ -930,7 +1023,7 @@ void LookoutDock::openSettings(){
  thumbnailPosition->setToolTip("Stacks vertically when the chosen width cannot fit both cards.");thumbnailPosition->setCurrentIndex(std::clamp(settings_.value("thumbnailPosition",0).toInt(),0,3));thumbnailForm->addRow("Thumbnail position",thumbnailPosition);
  connect(thumbnailPosition,&QComboBox::currentIndexChanged,this,[=](int value){settings_.setValue("thumbnailPosition",value);settings_.sync();refreshPanel();});
  auto *thumbnailWidth=new QSpinBox;thumbnailWidth->setObjectName("thumbnailWidth");thumbnailWidth->setRange(80,800);thumbnailWidth->setSuffix(" px");thumbnailWidth->setValue(settings_.value("thumbnailWidth",320).toInt());pixelForm->addRow("Thumbnail width",thumbnailWidth);
- thumbnailWidth->setToolTip("Fits within the panel width. Side-by-side layouts reserve room for information.");
+ thumbnailWidth->setToolTip("Used when the thumbnail is shown alone, with icons only, or with independent cards.");
  connect(thumbnailWidth,&QSpinBox::valueChanged,this,[=](int value){settings_.setValue("thumbnailWidth",value);rememberCustomSize();settings_.sync();syncGeometryControls();refreshPanel();});
  option("independentCards","Move cards individually",false);option("snapCards","Snap cards to each other",true);option("snapScreen","Snap to screen boundaries",true);
  for(const auto &entry:{qMakePair(QString("cardSpacing"),QString("Card spacing")),qMakePair(QString("snapDistance"),QString("Snap distance"))}){auto *value=new QSpinBox;value->setObjectName(entry.first);value->setRange(0,64);value->setSuffix(" px");value->setValue(settings_.value(entry.first,entry.first=="cardSpacing"?8:12).toInt());pixelForm->addRow(entry.second,value);connect(value,&QSpinBox::valueChanged,this,[this,key=entry.first](int n){settings_.setValue(key,n);settings_.sync();refreshPanel();});}
@@ -945,7 +1038,7 @@ void LookoutDock::openSettings(){
  layout->addStretch();
  auto *form=new QFormLayout;alertsLayout->addLayout(form);
  auto check=[&](const char *key,const QString &label){auto *c=new QCheckBox(label);c->setObjectName(key);c->setChecked(settings_.value(key,true).toBool());form->addRow(c);
-  connect(c,&QCheckBox::toggled,this,[=](bool value){settings_.setValue(key,value);settings_.sync();storageAlarm_=false;storageFull_=false;storageUnavailable_=false;encoderAlarm_=false;networkAlarm_=false;reconnectAlarm_=false;refreshPanel();});return c;};
+  connect(c,&QCheckBox::toggled,this,[=](bool value){settings_.setValue(key,value);settings_.sync();resetAlertRule(key);refreshPanel();});return c;};
  check("storage","Low or unavailable storage");check("encoder","Encoding lag");check("network","Stream network issues");check("lifecycle","Output start/stop notifications");
  auto spin=[&](const char *key,const QString &label,int initial,int min,int max){auto *control=new QSpinBox;control->setObjectName(key);control->setRange(min,max);control->setValue(settings_.value(key,initial).toInt());form->addRow(label,control);
   connect(control,&QSpinBox::valueChanged,this,[=](int value){settings_.setValue(key,value);settings_.sync();});};
@@ -957,6 +1050,21 @@ void LookoutDock::openSettings(){
  for(int i=0;i<previewLabels.size();++i){auto *button=new QPushButton(previewLabels[i]);button->setObjectName(QString("previewAlert%1").arg(i));previewButtons->addWidget(button,i/2,i%2);connect(button,&QPushButton::clicked,this,[this,i]{previewAlert(i);});}
  auto *stopPreview=new QPushButton("Stop preview");stopPreview->setObjectName("stopAlertPreview");previewButtons->addWidget(stopPreview,(previewLabels.size()+1)/2,0,1,2);connect(stopPreview,&QPushButton::clicked,this,[this]{glowPreviewUntil_=0;glowPreviewMetric_=-1;previewAlertTitle_.clear();previewAlertBody_.clear();applyMetricColors();refreshPanel();});alertsLayout->addStretch();
  auto *graphForm=new QFormLayout;graphsLayout->addLayout(graphForm);
+ auto *textStats=new QCheckBox;
+ textStats->setObjectName("textStats");
+ textStats->setChecked(textStatsEnabled());
+ graphForm->addRow("Show text stats",textStats);
+ connect(textStats,&QCheckBox::toggled,this,[this](bool value){setContentPreference("textStats",value);});
+ auto addVisibility=[this,graphForm](const QString &key,const QString &label,VisibilityMode mode){
+  auto *control=new QComboBox;
+  control->setObjectName(key);
+  control->addItems({"On","Active","Off"});
+  control->setCurrentIndex(mode);
+  graphForm->addRow(label,control);
+  connect(control,&QComboBox::currentIndexChanged,this,[this,key](int value){setContentPreference(key,value);});
+ };
+ addVisibility("iconVisibility","Icons",iconVisibility());
+ addVisibility("graphVisibility","Show graphs",graphVisibility());
  auto *historyRange=new QComboBox;historyRange->setObjectName("graphWindow");for(const auto &entry:{qMakePair(QString("30 seconds"),30),qMakePair(QString("1 minute"),60),qMakePair(QString("5 minutes"),300),qMakePair(QString("15 minutes"),900)})historyRange->addItem(entry.first,entry.second);historyRange->setCurrentIndex(std::max(0,historyRange->findData(settings_.value("graphWindow",60).toInt())));graphForm->addRow("History shown",historyRange);
  connect(historyRange,&QComboBox::currentIndexChanged,this,[this,historyRange](int index){settings_.setValue("graphWindow",historyRange->itemData(index));settings_.sync();configureGraphs();refreshPanel();});
  auto *clearHistory=new QPushButton("Clear history");clearHistory->setObjectName("clearHistory");graphsLayout->addWidget(clearHistory);connect(clearHistory,&QPushButton::clicked,this,[this]{graphs_->clearHistory();bitrates_->clearHistory();replay_->clearHistory();for(auto *view:graphViews_)view->update();});graphsLayout->addStretch();
@@ -1055,9 +1163,10 @@ double LookoutDock::panelScale() const {
  if(metricsVisible_){
   int rows=0;
   for(int i=0;i<StatCount;++i)rows+=hasReading(i);
-  if(rows){units+=rows*(line+2)+16;++count;}
+  if(textStatsEnabled() && rows){units+=rows*(line+2)+16;++count;}
+  if(iconVisibility()!=VisibilityOff){units+=40;++count;}
   auto addGraph=[&](const QString &id,double mini,double full){
-   const auto mode=graphMode(id);
+   const auto mode=visibleGraphMode(id);
    if(mode!=GraphOff){units+=mode==GraphMini?mini:full;++count;}
   };
   addGraph("bitrate",56,150);addGraph("replay",48,140);
@@ -1098,15 +1207,13 @@ void LookoutDock::placeIndependent(){
  };
  layoutStats(cardWidth("stats",width));
  const int thumbWidth=std::max(1,cardWidth("thumbnail",std::min(width,std::clamp(settings_.value("thumbnailWidth",320).toInt(),80,800)+16))-16);
- previewCard_->setFixedSize(thumbWidth+16,std::max(1,thumbWidth*9/16)+16);
- preview_->setFixedSize(thumbWidth,std::max(1,thumbWidth*9/16));
- updateAlertIcon();
+ layoutThumbnail(thumbWidth+16,thumbWidth);
  const auto widgets=movableCards();QMap<QString,QSize> sizes;int total=0;
- QStringList order{"thumbnail","alert","stats","bitrate","replay"};
+ QStringList order{"thumbnail","alert","stats","active-icons","bitrate","replay"};
  for(const auto &metric:HistoryGraphs::metrics)order.append(metric.card);
  for(const auto &id:order)if(auto *widget=widgets.value(id)){
-  const int w=cardWidth(id,width);
-  const int height=widget==previewCard_?previewCard_->height():widget==badgeText_?badgeText_->heightForWidth(w):widget==stats_?statsLayout_->sizeHint().height():widget==bitrates_?bitrates_->heightForWidth(w):widget==replay_?replay_->heightForWidth(w):static_cast<HistoryGraphs*>(widget)->heightForWidth(w);
+  const int w=widget==activeIcons_?std::min(cardWidth(id,width),activeIcons_->maximumWidth()):cardWidth(id,width);
+  const int height=widget==previewCard_?previewCard_->height():widget==stats_?statsLayout_->sizeHint().height():widget->heightForWidth(w);
   sizes[id]=QSize(widget==previewCard_?previewCard_->width():w,std::max(16,height));
   total+=sizes[id].height()+spacing;
  }
@@ -1118,13 +1225,21 @@ void LookoutDock::placeIndependent(){
  static_cast<NotificationPanel*>(badge_)->updateCards();placing_=false;
 }
 QVector<QRectF> LookoutDock::glowTargets() const {
- QVector<QRectF> result;const bool preview=glowPreviewUntil_>glowClock_.elapsed();bool statsAdded=false;
- if(activeIcons_->isVisibleTo(badge_) && activeIcons_->hasAlerts())return {QRectF(activeIcons_->mapTo(badge_,QPoint()),activeIcons_->size())};
+ QVector<QRectF> result;const bool preview=glowPreviewUntil_>glowClock_.elapsed();bool statsAdded=false,iconsAdded=false;
+ const auto iconRoles=activeIcons_->isVisibleTo(badge_)?activeIcons_->roles():QStringList{};
+ bool thumbnailAffected=false;
  for(int metric=0;metric<3;++metric){const int stat=1+2*metric;if(preview?glowPreviewMetric_!=stat:metricRisk(stat)<0)continue;
+  const QString role=statDefinitions_[stat].id;
+  if(!iconsAdded && (iconRoles.contains(role) || iconRoles.contains("alert:"+role))){
+   result<<QRectF(activeIcons_->mapTo(badge_,QPoint()),activeIcons_->size());iconsAdded=true;
+  }
   if(stats_->isVisibleTo(badge_) && hasReading(stat) && !statsAdded){result<<QRectF(stats_->mapTo(badge_,QPoint()),stats_->size());statsAdded=true;}
   HistoryGraphs *view=independentLayout_?graphViews_[metric]:graphs_;if(view->isVisibleTo(badge_)){const QRectF card=view->metricRect(metric);if(!card.isEmpty())result<<card.translated(view->mapTo(badge_,QPoint()));}
+  thumbnailAffected|=alertIcon_->property("alertRole").toString()==role;
  }
- if(result.isEmpty() && !thumbnailAlertPreview_.isActive() && alertIcon_->isVisibleTo(badge_))result<<QRectF(previewCard_->mapTo(badge_,QPoint()),previewCard_->size());return result;
+ if(result.isEmpty() && thumbnailAffected && !thumbnailAlertPreview_.isActive() && alertIcon_->isVisibleTo(badge_))
+  result<<QRectF(previewCard_->mapTo(badge_,QPoint()),previewCard_->size());
+ return result;
 }
 bool LookoutDock::eventFilter(QObject *watched,QEvent *event){
  if(event->type()==QEvent::LayoutRequest && !placing_)cardLayoutTimer_.start();
@@ -1208,6 +1323,14 @@ QColor LookoutDock::warningColor(double risk) const {
  QColor yellow(settings_.value("glowWarningColor","#ffd43b").toString()),red(settings_.value("glowCriticalColor","#ff3b4d").toString());
  if(!yellow.isValid())yellow=QColor("#ffd43b");if(!red.isValid())red=QColor("#ff3b4d");risk=std::clamp(risk,0.0,1.0);
  return risk>=1?red:yellow;
+}
+QColor LookoutDock::alertColor(const QString &title,bool critical) const {
+ return title=="Stream reconnected"?badge_->palette().color(QPalette::WindowText):warningColor(critical?1:0);
+}
+void LookoutDock::resetAlertRule(const QString &key){
+ if(key=="storage")storageAlarm_=storageFull_=false;
+ else if(key=="encoder")encoderAlarm_=false;
+ else if(key=="network")networkAlarm_=reconnectAlarm_=false;
 }
 void LookoutDock::previewGlow(double risk){
  previewAlertTitle_.clear();previewAlertBody_.clear();
@@ -1313,8 +1436,14 @@ void LookoutDock::syncVisibilityControls(){
    QSignalBlocker blocker(graph);graph->setCurrentIndex(graphMode(metric.id));
   }
  }
- if(auto *mode=dialog_->findChild<QComboBox*>("presentation")){
-  QSignalBlocker blocker(mode);mode->setCurrentIndex(mode->findData(displayMode()));
+ if(auto *mode=dialog_->findChild<QComboBox*>("iconVisibility")){
+  QSignalBlocker blocker(mode);mode->setCurrentIndex(iconVisibility());
+ }
+ if(auto *mode=dialog_->findChild<QComboBox*>("graphVisibility")){
+  QSignalBlocker blocker(mode);mode->setCurrentIndex(graphVisibility());
+ }
+ if(auto *textStats=dialog_->findChild<QCheckBox*>("textStats")){
+  QSignalBlocker blocker(textStats);textStats->setChecked(textStatsEnabled());
  }
  if(auto *box=dialog_->findChild<QCheckBox*>("independentCards"))box->setEnabled(!iconStripMode());
  if(auto *button=dialog_->findChild<QPushButton*>("dismissCurrentAlerts"))button->setEnabled(alertActive_ || sessionNotice_);
@@ -1356,21 +1485,41 @@ void LookoutDock::previewThumbnailAlert(){
 void LookoutDock::updateAlertIcon(){
  if(!alertIcon_)return;
  const bool preview=glowPreviewUntil_>glowClock_.elapsed() && !previewAlertTitle_.isEmpty();
- const bool enabled=(alertActive_ || preview) && settings_.value("showAlertIcon",true).toBool() && thumbnailEnabled() && (preview || glowPreviewUntil_<=glowClock_.elapsed());
+ const auto latest=alerts_.constFind(lastAlertTitle_);
+ const bool enabled=(latest!=alerts_.cend() || preview) && settings_.value("showAlertIcon",true).toBool() && thumbnailEnabled();
  const bool thumbnailPreview=thumbnailAlertPreview_.isActive();
  if(!enabled && !thumbnailPreview){alertIcon_->hide();return;}
- QString role="alerts";
- const QString alert=thumbnailPreview?QStringLiteral("storage"):(preview?previewAlertTitle_:lastAlertTitle_+" "+lastAlertBody_).toLower();
- if(alert.contains("storage") || alert.contains("disk"))role="storage";else if(alert.contains("encoder"))role="encoder";else if(alert.contains("stream") || alert.contains("network"))role="network";else if(alert.contains("recording"))role="record";else if(alert.contains("camera"))role="camera";
- if(!thumbnailPreview && !metricEnabled(role=="record"?"recording":role=="stream"?"streaming":role)){alertIcon_->hide();return;}
- alertIcon_->setProperty("alertRole",role);const int size=std::clamp(std::min(preview_->width(),preview_->height())/2,24,160);alertIcon_->setFixedSize(size,size);const qreal tileDpr=preview_->devicePixelRatioF();QPixmap tile(QSize(int(std::ceil(size*tileDpr)),int(std::ceil(size*tileDpr))));tile.setDevicePixelRatio(tileDpr);tile.fill(Qt::transparent);QPainter painter(&tile);painter.setRenderHint(QPainter::Antialiasing);QColor backdrop=badge_->palette().color(QPalette::Window);backdrop.setAlpha(210);painter.setBrush(backdrop);const bool restored=(preview?previewAlertTitle_:lastAlertTitle_)=="Stream reconnected";const QColor rim=thumbnailPreview?warningColor(0):restored?badge_->palette().color(QPalette::WindowText):warningColor(preview?glowPreviewRisk_:std::max(0.0,glowRisk()));alertIcon_->setProperty("alertColor",rim);painter.setPen(QPen(rim,LookoutVisuals::BorderWidth));painter.drawRoundedRect(QRectF(.5,.5,size-1,size-1),LookoutVisuals::PanelRadius,LookoutVisuals::PanelRadius);const int inset=size/5;painter.drawPixmap(QRect(inset,inset,size-2*inset,size-2*inset),uiIcon(role,backdrop.lightness()<128).pixmap(QSize(int((size-2*inset)*tileDpr),int((size-2*inset)*tileDpr))));painter.end();alertIcon_->setPixmap(tile);LookoutVisuals::roundWidget(alertIcon_,LookoutVisuals::PanelRadius);alertIcon_->move((preview_->width()-size)/2,(preview_->height()-size)/2);alertIcon_->show();alertIcon_->raise();
+ const QString title=preview?previewAlertTitle_:lastAlertTitle_;
+ const QString role=thumbnailPreview?QStringLiteral("storage"):alertRole(title);
+ const QColor rim=thumbnailPreview?warningColor(0):alertColor(title,preview?glowPreviewRisk_>=1:latest->critical);
+ alertIcon_->setProperty("alertRole",role);alertIcon_->setProperty("alertColor",rim);
+ const int size=std::clamp(std::min(preview_->width(),preview_->height())/2,24,160);
+ alertIcon_->setFixedSize(size,size);
+ const qreal tileDpr=preview_->devicePixelRatioF();
+ QPixmap tile(QSize(int(std::ceil(size*tileDpr)),int(std::ceil(size*tileDpr))));
+ tile.setDevicePixelRatio(tileDpr);tile.fill(Qt::transparent);
+ QPainter painter(&tile);painter.setRenderHint(QPainter::Antialiasing);
+ QColor backdrop=badge_->palette().color(QPalette::Window);backdrop.setAlpha(210);painter.setBrush(backdrop);
+ painter.setPen(QPen(rim,LookoutVisuals::BorderWidth));
+ painter.drawRoundedRect(QRectF(.5,.5,size-1,size-1),LookoutVisuals::PanelRadius,LookoutVisuals::PanelRadius);
+ const int inset=size/5;
+ painter.drawPixmap(QRect(inset,inset,size-2*inset,size-2*inset),uiIcon(role,backdrop.lightness()<128).pixmap(QSize(int((size-2*inset)*tileDpr),int((size-2*inset)*tileDpr))));
+ painter.end();alertIcon_->setPixmap(tile);LookoutVisuals::roundWidget(alertIcon_,LookoutVisuals::PanelRadius);
+ alertIcon_->move((preview_->width()-size)/2,(preview_->height()-size)/2);alertIcon_->show();alertIcon_->raise();
 }
 
 bool LookoutDock::thumbnailEnabled() const {return settings_.value("showThumbnail",false).toBool();}
 bool LookoutDock::thumbnailDisplayed() const {return thumbnailEnabled() || thumbnailAlertPreview_.isActive();}
+void LookoutDock::layoutThumbnail(int cardWidth,int videoWidth){
+ const int videoHeight=std::max(1,videoWidth*9/16);
+ previewCard_->setFixedSize(cardWidth,videoHeight+16);
+ // Publish the final preview bounds even while the Qt Quick model is hidden.
+ preview_->setGeometry((cardWidth-videoWidth)/2,8,videoWidth,videoHeight);
+ updateAlertIcon();
+}
 void LookoutDock::updateBitrateCard(){
  bitrates_->setOutputs(recordingActive_,streamingActive_,recordingBitrate_,streamingBitrate_,historyClock_.elapsed());
- bitrates_->setVisible(metricsVisible_ && graphMode("bitrate")!=GraphOff && !iconStripMode());
+ bitrates_->setVisible(metricsVisible_ && visibleGraphMode("bitrate")!=GraphOff);
 }
 std::optional<double> LookoutDock::diskMinutesRemaining() const {
  if(!recordingActive_ || recordingPaused_)return std::nullopt;
@@ -1388,7 +1537,7 @@ void LookoutDock::configureGraphs(){
  for(int i=0;i<HistoryGraphs::Count;++i){
   const auto *id=HistoryGraphs::metrics[i].id;
   const auto mode=graphMode(id);
-  selected[i]=mode!=GraphOff;mini[i]=mode==GraphMini;icons[i]=uiIcon(id,dark);
+  selected[i]=visibleGraphMode(id)!=GraphOff;mini[i]=mode==GraphMini;icons[i]=uiIcon(id,dark);
  }
  auto configure=[&](HistoryGraphs *graph,const std::array<bool,HistoryGraphs::Count> &selection){
   graph->setCompactMetrics(mini);graph->setMetricIcons(icons);graph->setAppearance(design);

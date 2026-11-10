@@ -61,7 +61,10 @@ private:
  QStringList dockOrder_;
  static QStringList defaultDockOrder();
  void applyDockOrder(const QStringList &order);
- void editDockOrder(const QString &id,const QString &operation);
+ void editDockOrder(const QString &id,const QString &operation,int target=-1);
+ bool dockShowsLabels() const;
+ void setDockLabels(bool show);
+ int preferredDockButtonWidth() const;
  void layoutDockActions();
  static void event(obs_frontend_event, void *);
  static void hotkey(void *, obs_hotkey_id, obs_hotkey_t *, bool);
@@ -104,6 +107,7 @@ private:
  void updateBitrateCard();
  bool thumbnailEnabled() const;
  bool thumbnailDisplayed() const;
+ void layoutThumbnail(int cardWidth,int videoWidth);
  HistoryGraphs *graphViews_[HistoryGraphs::Count]{};
  bool independentLayout_=false;
  QString dragCard_;
@@ -119,8 +123,15 @@ private:
   {5,"Icons"}, {4,"Active icons"}, {0,"Custom"}
  };
  enum GraphMode { GraphOff, GraphMini, GraphFull };
+ enum VisibilityMode { VisibilityOn, VisibilityActive, VisibilityOff };
  static constexpr const char *outputGraphIds_[] = {"bitrate","replay"};
  GraphMode graphMode(const QString &id) const;
+ GraphMode visibleGraphMode(const QString &id) const;
+ VisibilityMode graphVisibility() const;
+ VisibilityMode iconVisibility() const;
+ bool textStatsEnabled() const;
+ bool metricActive(const QString &id) const;
+ void setContentPreference(const QString &key, const QVariant &value);
  bool hasReading(int stat) const;
  std::optional<double> diskMinutesRemaining() const;
  void setDisplayMode(int mode);
@@ -192,11 +203,13 @@ private:
  QWidget *badge_;
 
  QLabel *badgeText_, *alertIcon_;
- QString lastAlertTitle_,lastAlertBody_;
+ QString lastAlertTitle_;
  int panelMode() const;
  void activateAction(int action);
  void syncVisibilityControls();
  void updateAlertIcon();
+ void resetAlertRule(const QString &key);
+ QColor alertColor(const QString &title,bool critical) const;
  QString storageText_, encoderText_, networkText_, captureStatus_;
  void setCaptureStatus(const QString &text);
  void setHotkeyBinding(int index,obs_key_combination_t combination);
@@ -216,7 +229,8 @@ private:
  qint64 freeBytes_ = -1, resultBytes_ = -1;
  bool storageAlarm_ = false, storageFull_=false, encoderAlarm_ = false, storageUnavailable_ = false;
  bool ready_ = false, alertActive_ = false, sessionNotice_=false, metricsVisible_=true;
- QMap<QString,QString> alerts_;
+ struct Alert { QString text; bool critical; };
+ QMap<QString,Alert> alerts_;
  obs_output_t *lastStream_ = nullptr;
  int networkTotal_ = 0, networkDropped_ = 0;
  bool networkAlarm_ = false, reconnectAlarm_ = false;

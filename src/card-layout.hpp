@@ -24,8 +24,9 @@ struct GroupedWidths {
  int thumbnail;
  bool alongside;
 };
-// Widths are logical pixels. Metrics keep the same column width when the
-// thumbnail moves beside them. The window width includes its outer padding.
-GroupedWidths groupedWidths(int screenWidth, int panelWidth, int thumbnailWidth,
-                           int spacing, bool sideRequested, bool showMetrics, bool showThumbnail);
+// Widths are logical pixels. Icon-only layouts may size the columns separately.
+// The thumbnail width returned excludes its card padding.
+GroupedWidths groupedWidths(int screenWidth, int panelWidth, int standaloneThumbnailWidth,
+                           int spacing, bool sideRequested, bool showMetrics, bool showThumbnail,
+                           bool matchWidths = true);
 }

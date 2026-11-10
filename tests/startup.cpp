@@ -158,8 +158,8 @@ struct LookoutTestAccess {
     const QRect stats(dock.stats_->mapTo(dock.badge_,QPoint()),dock.stats_->size());
     const QRect thumbnail(dock.previewCard_->mapTo(dock.badge_,QPoint()),dock.previewCard_->size());
     if(placement==0){metricsWidth=stats.width();thumbnailWidth=thumbnail.width();}
-    checkState(stats.width()==metricsWidth && thumbnail.width()==thumbnailWidth,
-               "grouped thumbnail placement preserves both widths when the display has room");
+    checkState(stats.width()==metricsWidth && thumbnail.width()==thumbnailWidth && stats.width()==thumbnail.width(),
+               "grouped thumbnail placement keeps the same width as stats on every side");
     checkState(!stats.intersects(thumbnail) && dock.badge_->rect().contains(thumbnail),
                "thumbnail and metrics are separate and inside the overlay");
     checkState(placement==0?thumbnail.bottom()<stats.top():placement==1?thumbnail.top()>stats.bottom():
@@ -291,6 +291,35 @@ struct LookoutTestAccess {
   checkState(privateSurfaces(100)>1 && privateSurfaces(10)>1 && privateSurfaces(0)==1,"full and subtle blur are private, and zero disables the backdrop");
   dock.settings_.setValue("showInCaptures",true);dock.settings_.setValue("backgroundOpacity",0);
   dock.glowPreviewUntil_=0;dock.dismissAlert();dock.refreshPanel();wait(300);
+  backdrop.setCursor(Qt::BlankCursor);
+  RECT panelRect{};GetWindowRect(target.window,&panelRect);
+  const QPoint local=dock.stats_->mapTo(dock.badge_,dock.stats_->rect().center());
+  const POINT overStats{panelRect.left+qRound(local.x()*dpi),panelRect.top+qRound(local.y()*dpi)};
+  const POINT outsidePanel{panelRect.left-24,overStats.y};
+  POINT savedPointer{};GetCursorPos(&savedPointer);
+  auto cursorAt=[&](POINT point){
+   SetCursorPos(point.x,point.y);wait(100);
+   CURSORINFO cursor{sizeof(cursor)};
+   checkState(GetCursorInfo(&cursor),"read the underlying window's cursor");
+   return cursor.hCursor;
+  };
+  const auto blank=cursorAt(outsidePanel);
+  for(int blur:{0,50}){
+   dock.settings_.setValue("blurAmount",blur);dock.refreshPanel();wait(250);
+   const auto hit=WindowFromPoint(overStats);
+   const auto cursor=cursorAt(overStats);
+   wchar_t hitClass[128]{};
+   GetClassNameW(hit,hitClass,128);
+   std::fprintf(stdout,"Passive overlay with %d%% blur: hit=%ls, enabled=%d, styles=%lx, underlying hit=%d, cursor preserved=%d\n",blur,
+                hitClass,IsWindowEnabled(hit),static_cast<unsigned long>(GetWindowLongPtrW(hit,GWL_EXSTYLE)),
+                GetAncestor(hit,GA_ROOT)==reinterpret_cast<HWND>(backdrop.winId()),cursor==blank);
+   SetCursorPos(savedPointer.x,savedPointer.y);
+   checkState(GetAncestor(hit,GA_ROOT)==reinterpret_cast<HWND>(backdrop.winId()) && cursor==blank,
+              "passive panels pass pointer input through and preserve the hidden cursor");
+   cursorAt(outsidePanel);
+  }
+  SetCursorPos(savedPointer.x,savedPointer.y);
+  backdrop.unsetCursor();
   const auto stripePoint=[&](int x){
    return dock.badge_->pos()+dock.stats_->mapTo(dock.badge_,QPoint(x,dock.stats_->height()/2));
   };
@@ -335,7 +364,7 @@ struct LookoutTestAccess {
              "higher blur settings continue softening broader details");
   fineStripe.hide();broadStripe.hide();dock.settings_.setValue("backgroundOpacity",100);
   dock.activateAction(1);dock.dismissAlert();wait(350);checkState(!IsWindowVisible(target.window),"Hide removes QML cards and glow");dock.activateAction(0);wait(350);checkState(IsWindowVisible(target.window),"Show restores QML panels immediately");
-  dock.glowPreviewUntil_=0;dock.settings_.setValue("showInCaptures",true);dock.settings_.setValue("blurAmount",0);dock.settings_.setValue("showThumbnail",false);dock.settings_.setValue("panelWidth",320);dock.setEditMode(true);dock.refreshPanel();wait(250);const QPoint old=dock.badge_->pos(),start=dock.stats_->mapToGlobal(dock.stats_->rect().center());auto drag=[&](QString phase){dock.quick_->command({{"type","transform"},{"phase",phase},{"card","stats"},{"sx",start.x()},{"sy",start.y()},{"ex",start.x()+30},{"ey",start.y()+20}});};drag("begin");drag("move");checkState(dock.dragging_ && dock.badge_->pos()==old+QPoint(30,20),"QML window follows the pointer before release");drag("end");checkState(!dock.dragging_ && dock.badge_->pos()==old+QPoint(30,20),"QML drag commits with existing persistent placement controls");
+  dock.glowPreviewUntil_=0;dock.settings_.setValue("showInCaptures",true);dock.settings_.setValue("blurAmount",50);dock.settings_.setValue("showThumbnail",false);dock.settings_.setValue("panelWidth",320);dock.setEditMode(true);dock.refreshPanel();wait(250);const QPoint old=dock.badge_->pos(),start=dock.stats_->mapToGlobal(dock.stats_->rect().center());auto drag=[&](QString phase){dock.quick_->command({{"type","transform"},{"phase",phase},{"card","stats"},{"sx",start.x()},{"sy",start.y()},{"ex",start.x()+30},{"ey",start.y()+20}});};drag("begin");drag("move");checkState(dock.dragging_ && dock.badge_->pos()==old+QPoint(30,20),"QML window follows the pointer before release");drag("end");checkState(!dock.dragging_ && dock.badge_->pos()==old+QPoint(30,20),"QML drag commits with existing persistent placement controls");
   wait(180);
   target.window=nullptr;
   EnumWindows(find,reinterpret_cast<LPARAM>(&target));
@@ -363,7 +392,6 @@ struct LookoutTestAccess {
              "the rendered native overlay follows the resize during the gesture");
   checkState(!dock.dragging_ && dock.settings_.value("panelScale").toInt()==4,"QML resize commits the custom size");
   dock.settings_.setValue("independentCards",true);dock.refreshPanel();const QPoint cardStart=dock.stats_->mapToGlobal(dock.stats_->rect().center());dock.quick_->command({{"type","transform"},{"card","stats"},{"sx",cardStart.x()},{"sy",cardStart.y()},{"ex",cardStart.x()+50},{"ey",cardStart.y()+40}});checkState(dock.settings_.value("cardPositions").toMap().contains("stats"),"QML individual-card drag preserves existing preset keys and snapping");dock.settings_.setValue("independentCards",false);dock.setEditMode(false);
-  backdrop.hide();
   dock.openSettings();
   wait(650);
   Find settingsWindow{target.pid};
@@ -423,10 +451,13 @@ struct LookoutTestAccess {
   dock.refreshPanel();
   dock.quick_->settingsCommand({{"action","dockButton"},{"key","toggleThumbnail"},{"value","add"}});
   checkState(dock.dockOrder_.last()=="toggleThumbnail","Dock settings adds the chosen action");
-  dock.quick_->settingsCommand({{"action","dockButton"},{"key","toggleThumbnail"},{"value","up"}});
-  checkState(dock.dockOrder_.at(dock.dockOrder_.size()-2)=="toggleThumbnail","Dock settings reorders the chosen action");
+  dock.quick_->settingsCommand({{"action","dockButton"},{"key","toggleThumbnail"},{"value",0}});
+  checkState(dock.dockOrder_.first()=="toggleThumbnail","Dock settings moves the dragged action to its drop index");
   dock.quick_->settingsCommand({{"action","dockButton"},{"value","reset"}});
   checkState(dock.dockOrder_==dock.defaultDockOrder(),"Dock settings restores the default actions");
+  dock.quick_->settingsCommand({{"action","dockLabels"},{"value",true}});
+  checkState(dock.dockShowsLabels() && !dock.dockButtons_["showPanels"]->text().isEmpty(),"Dock settings enables native labels");
+  dock.quick_->settingsCommand({{"action","dockLabels"},{"value",false}});
   wchar_t settingsTitle[128]{};
   GetWindowTextW(settingsWindow.window,settingsTitle,128);
   checkState(QString::fromWCharArray(settingsTitle).trimmed().isEmpty(),"settings caption contains no visible text");
@@ -500,6 +531,7 @@ struct LookoutTestAccess {
   checkState(!dock.quick_->snapshot()["logoDark"].toBool() &&
              lightSurface.lightness()>darkSurface.lightness()+10,
              "light and dark palettes render visibly different cards at 25% opacity and 50% blur");
+  backdrop.hide();
   set("backgroundOpacity",100);
   set("blurAmount",0);
   set("panelDesign","signal");
@@ -513,8 +545,8 @@ struct LookoutTestAccess {
   dock.quick_->settingsCommand({{"action","set"},{"key","graph/memory"},{"value",2}});
   dock.quick_->settingsCommand({{"action","set"},{"key","graph/disk-time"},{"value",1}});
   for(int mode:{5,4,0}){
-   dock.quick_->settingsCommand({{"action","set"},{"key","presentation"},{"value",mode}});
-   checkState(dock.displayMode()==mode,"QML accepts the three display modes");
+   dock.setDisplayMode(mode);
+   checkState(dock.displayMode()==mode,"dock display presets are available with the QML renderer");
    if(mode==0){
     const auto snapshot=dock.quick_->snapshot();
     QMap<QString,bool> styles;
@@ -605,6 +637,38 @@ struct LookoutTestAccess {
   dock.setDisplayMode(0);
   checkState(!dock.graphs_->isHidden() && dock.graphs_->compact(3) && dock.statNames_[LookoutDock::StorageStat]->isHidden(),
              "returning to Custom restores the individual choices");
+  auto *graphs=dock.dialog_->findChild<QComboBox*>("graphVisibility");
+  auto *icons=dock.dialog_->findChild<QComboBox*>("iconVisibility");
+  checkState(graphs && icons,"graphs and icons have independent global controls");
+  dock.recordingActive_=dock.streamingActive_=dock.replayActive_=dock.cameraActive_=false;
+  graphs->setCurrentIndex(LookoutDock::VisibilityOff);
+  icons->setCurrentIndex(LookoutDock::VisibilityOn);
+  checkState(dock.graphs_->isHidden() && dock.bitrates_->isHidden() && dock.replay_->isHidden() &&
+             !dock.stats_->isHidden() && !dock.activeIcons_->roles().contains("storage"),
+             "global modes do not affect text stats or override per-metric selections");
+  graphs->setCurrentIndex(LookoutDock::VisibilityActive);
+  icons->setCurrentIndex(LookoutDock::VisibilityActive);
+  checkState(dock.graphs_->isHidden() && dock.activeIcons_->isHidden(),"Active graphs and icons are hidden while idle");
+  dock.streamingActive_=true;dock.refreshPanel();
+  checkState(!dock.bitrates_->isHidden() && dock.replay_->isHidden() && dock.graphs_->metricRect(0).isEmpty() &&
+             !dock.graphs_->metricRect(3).isEmpty() && dock.activeIcons_->roles().contains("streaming") &&
+             !dock.activeIcons_->roles().contains("recording"),"streaming shows bitrate and process metrics but no recording or replay panels");
+  dock.recordingActive_=dock.replayActive_=true;dock.refreshPanel();
+  checkState(!dock.replay_->isHidden() && !dock.graphs_->metricRect(0).isEmpty() &&
+             !dock.activeIcons_->roles().contains("storage"),"starting outputs restores their graphs without enabling unselected icons");
+  dock.recordingActive_=dock.streamingActive_=dock.replayActive_=false;
+  graphs->setCurrentIndex(LookoutDock::VisibilityOn);
+  icons->setCurrentIndex(LookoutDock::VisibilityOff);
+  checkState(!dock.graphs_->isHidden() && dock.graphs_->compact(3) && !dock.bitrates_->isHidden() &&
+             !dock.replay_->isHidden() && dock.activeIcons_->isHidden(),
+             "On restores saved graph sizes while icon Off only hides the icon card");
+  icons->setCurrentIndex(LookoutDock::VisibilityOn);
+  checkState(dock.activeIcons_->roles().contains("recording") && !dock.activeIcons_->roles().contains("storage"),
+             "re-enabling icons restores the saved selection");
+  const QSettings persisted(dock.settings_.fileName(),QSettings::IniFormat);
+  checkState(persisted.value("iconVisibility").toInt()==LookoutDock::VisibilityOn &&
+             persisted.value("graph/cpu").toInt()==LookoutDock::GraphMini &&
+             !persisted.value("iconVisible/storage",true).toBool(),"visibility and individual choices persist to disk");
   format(dock,0);
   for(const auto &metric:LookoutDock::statDefinitions_)
    dock.settings_.setValue(QString(metric.id)=="bitrate"?"showBitrate":QString("iconVisible/")+metric.id,false);
@@ -636,16 +700,63 @@ struct LookoutTestAccess {
  static void iconMode(LookoutDock &dock){
   QVariantMap saved;for(const auto &key:dock.settings_.allKeys())saved[key]=dock.settings_.value(key);const bool rec=dock.recordingActive_,stream=dock.streamingActive_;
   dock.setEditMode(false);dock.dismissAlert();dock.settings_.setValue("animationStyle",0);dock.settings_.setValue("statsDisplay",4);dock.settings_.setValue("showThumbnail",false);dock.metricsVisible_=true;dock.settings_.setValue("panelMode",1);dock.settings_.setValue("showInCaptures",true);dock.recordingActive_=dock.streamingActive_=false;dock.refreshPanel();checkState(!dock.badge_->isVisible(),"idle icon mode has no empty panel");
-  dock.recordingActive_=true;dock.refreshPanel();checkState(!dock.activeIcons_->isHidden() && dock.activeIcons_->roles()==QStringList{"recording"},"icon mode appears automatically for active recording");
-  dock.streamingActive_=true;dock.refreshPanel();checkState(dock.activeIcons_->iconCount()==2 && dock.stats_->isHidden() && dock.graphs_->isHidden() && dock.bitrates_->isHidden() && dock.previewCard_->isHidden() && dock.badgeText_->isHidden(),"icon mode excludes normal cards and inactive stats");
-  dock.notify("Network interruption","Connection lost",true);checkState(dock.activeIcons_->roles().contains("alert:network"),"network alert adds its relevant icon");dock.dismissAlert();checkState(dock.activeIcons_->iconCount()==2,"dismiss keeps active status icons");
+  dock.recordingActive_=true;dock.refreshPanel();checkState(!dock.activeIcons_->isHidden() && dock.activeIcons_->roles().contains("recording") && !dock.activeIcons_->roles().contains("streaming"),"icon mode appears automatically for active recording");
+  dock.streamingActive_=true;dock.refreshPanel();checkState(dock.activeIcons_->roles().contains("network") && dock.stats_->isHidden() && dock.graphs_->isHidden() && dock.bitrates_->isHidden() && dock.previewCard_->isHidden() && dock.badgeText_->isHidden(),"icon mode excludes normal cards and inactive stats");
+  const int activeCount=dock.activeIcons_->iconCount();
+  dock.notify("Network interruption","Connection lost",true);checkState(dock.activeIcons_->hasAlerts() && dock.activeIcons_->iconCount()==activeCount,"network alert highlights its existing icon");dock.dismissAlert();checkState(dock.activeIcons_->iconCount()==activeCount,"dismiss keeps active status icons");
   dock.recordingActive_=dock.streamingActive_=false;dock.notify("Storage full","No recording space",true);checkState(dock.activeIcons_->roles()==QStringList{"alert:storage"},"idle alert displays the relevant icon alone");dock.activateAction(2);checkState(!dock.badge_->isVisible() && dock.alerts_.isEmpty(),"Disable panel suppresses the icon overlay and alerts");
-  dock.settings_.setValue("statsDisplay",5);dock.settings_.setValue("panelMode",1);dock.refreshPanel();checkState(dock.activeIcons_->iconCount()==LookoutDock::StatCount && dock.activeIcons_->roles().contains("replay") && !dock.activeIcons_->isHidden(),"all-icons mode retains every status including replay while idle");dock.notify("Storage full","No space",true);checkState(dock.activeIcons_->iconCount()==LookoutDock::StatCount && dock.activeIcons_->toolTip().contains("Storage full"),"all-icons alerts highlight the existing relevant glyph without duplicating it");if(!qEnvironmentVariableIsEmpty("LOOKOUT_GPU_CAPTURE")){QApplication::processEvents();checkState(dock.badge_->grab().save(qEnvironmentVariable("LOOKOUT_GPU_CAPTURE")+".all-icons.png"),"all-icons native layout screenshot");}dock.dismissAlert();dock.replayActive_=true;dock.settings_.setValue("statsDisplay",4);dock.refreshPanel();checkState(dock.activeIcons_->roles()==QStringList{"replay"},"active-icons mode includes the running replay buffer");dock.replayActive_=false;
+  dock.settings_.setValue("statsDisplay",5);dock.settings_.setValue("panelMode",1);dock.refreshPanel();checkState(dock.activeIcons_->iconCount()==LookoutDock::StatCount && dock.activeIcons_->roles().contains("replay") && !dock.activeIcons_->isHidden(),"all-icons mode retains every status including replay while idle");dock.notify("Storage full","No space",true);checkState(dock.activeIcons_->iconCount()==LookoutDock::StatCount && dock.activeIcons_->toolTip().contains("Storage full"),"all-icons alerts highlight the existing relevant glyph without duplicating it");if(!qEnvironmentVariableIsEmpty("LOOKOUT_GPU_CAPTURE")){QApplication::processEvents();checkState(dock.badge_->grab().save(qEnvironmentVariable("LOOKOUT_GPU_CAPTURE")+".all-icons.png"),"all-icons native layout screenshot");}dock.dismissAlert();dock.replayActive_=true;dock.settings_.setValue("statsDisplay",4);dock.refreshPanel();checkState(dock.activeIcons_->roles().contains("replay") && !dock.activeIcons_->roles().contains("bitrate"),"active-icons mode includes the running replay buffer without recording or streaming bitrate");dock.replayActive_=false;
+  dock.settings_.setValue("untilDismiss",true);
   for(int mode:{4,5}){format(dock,mode);dock.settings_.setValue("panelMode",1);dock.recordingActive_=dock.streamingActive_=dock.cameraActive_=dock.replayActive_=true;dock.notify("Storage full","No space",true);dock.notify("Encoder issue","Skipped frames",true);dock.notify("Network issue","Disconnected",true);dock.refreshPanel();
-   for(const QString id:{"recording","storage","streaming","encoder","camera","network","cpu","memory","disk-time","bitrate","replay"}){auto *toggle=dock.dialog_->findChild<QCheckBox*>("metric_"+id);checkState(toggle && toggle->isEnabled(),"each stat has a toggle in both icon-only modes");toggle->setChecked(false);checkState(!dock.activeIcons_->roles().contains(id) && !dock.activeIcons_->roles().contains("alert:"+id),"disabled stat icons stay hidden even during their alerts");toggle->setChecked(true);}
-   for(const QString id:{"recording","storage","streaming","encoder","camera","network","cpu","memory","disk-time","bitrate","replay"})dock.dialog_->findChild<QCheckBox*>("metric_"+id)->setChecked(false);checkState(dock.activeIcons_->iconCount()==0 && dock.activeIcons_->isHidden(),"no empty icon panel remains when every stat is disabled");for(const QString id:{"recording","storage","streaming","encoder","camera","network","cpu","memory","disk-time","bitrate","replay"})dock.dialog_->findChild<QCheckBox*>("metric_"+id)->setChecked(true);dock.dismissAlert();
+   const QStringList metrics{"recording","storage","streaming","encoder","camera","network","cpu","memory","disk-time","bitrate","replay"};
+   for(const auto &id:metrics){
+    auto *toggle=dock.dialog_->findChild<QCheckBox*>("metric_"+id);
+    checkState(toggle && toggle->isEnabled(),"each stat has a toggle in both icon-only modes");
+    toggle->setChecked(false);
+    checkState(!dock.activeIcons_->roles().contains(id),"disabled metrics do not appear as regular status icons");
+   }
+   checkState(dock.activeIcons_->iconCount()==3 && dock.activeIcons_->roles().contains("alert:encoder"),
+              "disabling every metric preserves alert-only icons");
+   dock.dismissAlert();
+   checkState(dock.activeIcons_->iconCount()==0 && dock.activeIcons_->isHidden(),"dismissing alerts leaves no empty icon card");
+   for(const auto &id:metrics)dock.dialog_->findChild<QCheckBox*>("metric_"+id)->setChecked(true);
   }
   dock.cameraActive_=dock.replayActive_=false;dock.dismissAlert();dock.recordingActive_=rec;dock.streamingActive_=stream;dock.settings_.clear();for(auto it=saved.cbegin();it!=saved.cend();++it)dock.settings_.setValue(it.key(),it.value());dock.syncVisibilityControls();dock.refreshPanel();
+ }
+ static void alertPresentation(LookoutDock &dock){
+  QVariantMap saved;
+  for(const auto &key:dock.settings_.allKeys())saved[key]=dock.settings_.value(key);
+  dock.settings_.setValue("statsDisplay",0);
+  dock.settings_.setValue("panelMode",1);
+  dock.settings_.setValue("untilDismiss",true);
+  dock.settings_.setValue("showThumbnail",true);
+  dock.settings_.setValue("showAlertIcon",true);
+  dock.settings_.setValue("graph/encoder",LookoutDock::GraphFull);
+  dock.metricsVisible_=true;
+  dock.notify("Encoder overload","40.8% skipped",true);
+  for(bool text:{false,true})for(bool metric:{false,true})for(int icons:{0,1,2})for(int graphs:{0,1,2}){
+   dock.settings_.setValue("textStats",text);
+   dock.settings_.setValue("iconVisible/encoder",metric);
+   dock.settings_.setValue("iconVisibility",icons);
+   dock.settings_.setValue("graphVisibility",graphs);
+   dock.refreshPanel();
+   checkState(!dock.badgeText_->isHidden() && dock.badgeText_->text().contains("40.8% skipped"),
+              "panel content switches preserve the current alert callout");
+   checkState(!dock.alertIcon_->isHidden() && dock.alertIcon_->property("alertRole")=="encoder" &&
+              dock.alertIcon_->property("alertColor").value<QColor>()==dock.warningColor(1),
+              "panel content switches preserve the thumbnail symbol and its original severity");
+  }
+  dock.settings_.setValue("showAlertIcon",false);
+  dock.refreshPanel();
+  checkState(dock.alertIcon_->isHidden() && !dock.badgeText_->isHidden(),"the thumbnail symbol can be turned off independently");
+  dock.settings_.setValue("showAlertIcon",true);
+  dock.notify("Stream stopped with an error","The encoder stopped unexpectedly",true);
+  checkState(dock.alertIcon_->property("alertRole")=="network","alert details cannot change which icon is used");
+  dock.dismissAlert();
+  checkState(dock.alertIcon_->isHidden() && dock.badgeText_->isHidden(),"dismissing clears both alert surfaces");
+  dock.settings_.clear();
+  for(auto it=saved.cbegin();it!=saved.cend();++it)dock.settings_.setValue(it.key(),it.value());
+  dock.refreshPanel();
  }
  static void nativePanels(LookoutDock &dock,const QString &path){
 #ifdef _WIN32
@@ -675,9 +786,73 @@ struct LookoutTestAccess {
   for(int mode:{0,4,5}){
    dock.settings_.setValue("showThumbnail",true);format(dock,mode);dock.refreshPanel();
    checkState(dock.thumbnailEnabled() && !dock.previewCard_->isHidden(),"enabled thumbnail survives every display mode");
+   auto *metrics=mode==0?dock.stats_:static_cast<QWidget*>(dock.activeIcons_);
+   for(int position:{0,1,2,3}){
+    dock.settings_.setValue("thumbnailPosition",position);dock.refreshPanel();
+    checkState(!metrics->isHidden() && (mode==0?dock.previewCard_->width()==metrics->width():
+               metrics->width()<=dock.activeIcons_->sizeHint().width()),
+               "grouped stats match the thumbnail while icon cards use their natural width");
+   }
    dock.settings_.setValue("showThumbnail",false);dock.refreshPanel();
    checkState(!dock.thumbnailEnabled() && dock.previewCard_->isHidden(),"disabled thumbnail stays hidden in every display mode");
   }
+  const bool camera=dock.cameraActive_,replay=dock.replayActive_;
+  format(dock,4);
+  dock.settings_.setValue("panelScale",4);
+  dock.settings_.setValue("showThumbnail",true);
+  dock.settings_.setValue("thumbnailWidth",160);
+  dock.recordingActive_=dock.streamingActive_=false;
+  for(const auto *id:{"encoder","cpu","memory"})
+   dock.settings_.setValue(QString("iconVisible/")+id,false);
+  dock.settings_.setValue("iconVisible/replay",true);
+  dock.settings_.setValue("iconVisible/camera",true);
+  for(int position:{0,1,2,3}){
+   dock.settings_.setValue("thumbnailPosition",position);
+   for(int count:{0,1,2}){
+    dock.replayActive_=count>=1;
+    dock.cameraActive_=count==2;
+    dock.refreshPanel();
+    const bool matches=dock.activeIcons_->iconCount()==count && dock.preview_->width()==160 &&
+                       (count==0 || (dock.activeIcons_->width()==dock.activeIcons_->sizeHint().width() &&
+                                     dock.activeIcons_->width()<dock.previewCard_->width()));
+    if(!matches)std::fprintf(stderr,"Thumbnail layout: position=%d icons=%d/%d preview=%d card=%d icon bar=%d\n",
+      position,dock.activeIcons_->iconCount(),count,dock.preview_->width(),dock.previewCard_->width(),dock.activeIcons_->width());
+    checkState(matches,"the icon card fits its icons while the thumbnail keeps its configured width");
+   }
+  }
+  dock.settings_.setValue("showThumbnail",false);
+  dock.refreshPanel();
+  checkState(dock.activeIcons_->width()==dock.activeIcons_->sizeHint().width(),
+             "the icon bar stays compact when the thumbnail is hidden");
+  dock.cameraActive_=camera;dock.replayActive_=replay;
+  dock.recordingActive_=dock.streamingActive_=true;
+  for(const auto *id:{"encoder","cpu","memory","replay","camera"}){
+   const QString key=QString("iconVisible/")+id;
+   dock.settings_.setValue(key,saved.value(key,true));
+  }
+  format(dock,0);
+  dock.settings_.setValue("showThumbnail",true);
+  dock.settings_.setValue("panelScale",4);
+  dock.settings_.setValue("thumbnailPosition",0);
+  dock.settings_.setValue("panelWidth",400);
+  dock.refreshPanel();
+  QApplication::processEvents();
+  // Qt Quick uses the geometry of a hidden widget tree without waiting for layout events.
+  dock.badge_->hide();
+  for(int width:{300,401,268}){
+   dock.settings_.setValue("panelWidth",width);
+   dock.place(dock.badge_,"");
+   const auto frame=dock.preview_->geometry();
+   const auto card=dock.previewCard_->rect();
+   checkState(card.contains(frame) && std::abs(frame.left()-(card.right()-frame.right()))<=1 &&
+              frame.top()==8 && card.bottom()-frame.bottom()==8,
+              "hidden thumbnail geometry is centered immediately after resizing");
+  }
+  const auto centered=dock.preview_->pos();
+  dock.preview_->move(centered+QPoint(41,0));
+  dock.place(dock.badge_,"");
+  checkState(dock.preview_->pos()==centered,"layout corrects a stale thumbnail offset even when the card size stays the same");
+  dock.settings_.setValue("showThumbnail",false);
   format(dock,1);dock.refreshPanel();
   for(const char *key:{"graph_storage","graph_encoder","graph_network"})dock.dialog_->findChild<QComboBox*>(key)->setCurrentIndex(0);checkState(dock.graphs_->isHidden(),"no empty graph card is drawn with every chart off");
   dock.dialog_->findChild<QCheckBox*>("independentCards")->setChecked(true);dock.settings_.setValue("thumbnailWidth",120);dock.settings_.setValue("panelWidth",400);dock.refreshPanel();checkState(dock.previewCard_->width()==136 && !dock.dialog_->findChild<QComboBox*>("thumbnailPosition")->isEnabled(),"independent thumbnail respects width and grouped-position control is disabled");
@@ -704,9 +879,29 @@ struct LookoutTestAccess {
     placed.append(rect);
    }
   }
+  dock.setDockLabels(true);
+  dock.resize(100,dock.minimumHeight());QApplication::processEvents();
+  for(const auto &id:dock.dockOrder_){
+   auto *button=dock.dockButtons_[id];
+   checkState(!button->text().isEmpty() && !button->icon().isNull() &&
+              dock.rect().contains(button->geometry()),"icons and labels fit in a narrow dock");
+  }
+  dock.resize(dock.sizeHint());QApplication::processEvents();
+  for(const auto &id:dock.dockOrder_){
+   auto *button=dock.dockButtons_[id];
+   checkState(button->text()==button->accessibleName(),"the full label is visible when the dock is wide enough");
+  }
+  const QSettings labelsPreference(dock.settings_.fileName(),QSettings::IniFormat);
+  checkState(labelsPreference.value("dockLabels").toBool(),"dock label mode is saved");
+  dock.setDockLabels(false);
+  for(const auto &id:dock.dockOrder_)
+   checkState(dock.dockButtons_[id]->text().isEmpty(),"switching back restores icon-only buttons");
   dock.editDockOrder("lookoutSettings","remove");
   dock.editDockOrder("toggleThumbnail","add");
   dock.editDockOrder("toggleThumbnail","add");
+  dock.editDockOrder("toggleThumbnail","move",0);
+  checkState(dock.dockOrder_.first()=="toggleThumbnail","dragging can move an action across multiple slots");
+  dock.editDockOrder("toggleThumbnail","move",5);
   dock.editDockOrder("toggleThumbnail","up");
   checkState(dock.dockOrder_.size()==6 && dock.dockOrder_[4]=="toggleThumbnail" &&
              dock.dockButtons_["lookoutSettings"]->isHidden(),"dock actions can be added once, removed, and reordered");
@@ -778,7 +973,8 @@ struct LookoutTestAccess {
   if(!qEnvironmentVariableIsEmpty("LOOKOUT_SCREENSHOT")){history.resize(600,history.heightForWidth(600));checkState(history.grab().save(qEnvironmentVariable("LOOKOUT_SCREENSHOT")+".graphs.png"),"labeled graph rendering");for(int preset=0;preset<9;++preset){history.setAppearance(preset);history.resize(600,history.heightForWidth(600));checkState(history.grab().save(qEnvironmentVariable("LOOKOUT_SCREENSHOT")+QString(".preset%1.png").arg(preset)),"graph preset rendering");}}
   history.setAppearance(1);const int compactGraphHeight=history.heightForWidth(600);history.setAppearance(3);checkState(history.heightForWidth(600)==compactGraphHeight,"all designs default to the same single-column arrangement");
   history.clearHistory();checkState(history.sampleCount()==0,"graph history can be cleared");
-  checkState(dock.findChild<QComboBox*>("graph_cpu") && dock.findChild<QComboBox*>("presentation"),"graph sizes are configured per metric");format(dock,1);
+  checkState(dock.findChild<QComboBox*>("graph_cpu") && !dock.findChild<QComboBox*>("presentation"),
+             "graph sizes are configured per metric without a display-mode dropdown");format(dock,1);
   checkState(!dock.stats_->isHidden() && !dock.graphs_->isHidden(),"graphs can accompany text stats");format(dock,2);
   checkState(!dock.stats_->isHidden() && !dock.graphs_->isHidden(),"graphs always accompany the selected readings");format(dock,0);
   format(dock,3);dock.refreshPanel();
@@ -796,7 +992,8 @@ struct LookoutTestAccess {
   dock.settings_.setValue("panelMode",1);format(dock,0);dock.metricsVisible_=true;
   dock.settings_.setValue("showThumbnail",true);dock.settings_.setValue("panelWidth",300);dock.settings_.setValue("thumbnailWidth",180);dock.refreshPanel();
   checkState(!dock.previewCard_->isHidden() && !dock.information_->isHidden(),"placement test shows both columns");
-  const bool fitsSide=QGuiApplication::primaryScreen()->availableGeometry().width()>=300+dock.panelLayout_->spacing()+16+80;
+  const bool fitsSide=QGuiApplication::primaryScreen()->availableGeometry().width()>=
+   2*dock.stats_->width()+16+dock.panelLayout_->spacing();
   position->setCurrentIndex(2);dock.place(dock.badge_,"");
   checkState(dock.panelLayout_->direction()==(fitsSide?QBoxLayout::RightToLeft:QBoxLayout::BottomToTop),
              "left thumbnail stacks above the metrics only when the display is too narrow");
@@ -871,11 +1068,11 @@ struct LookoutTestAccess {
    checkState(dock.displayMode()==item->data().toInt() && dock.panelMode()==2 && !dock.thumbnailEnabled(),"dock display changes preserve panel visibility and thumbnail settings");
   }
   dock.setDisplayMode(previousMode);
-  dock.settings_.setValue("showThumbnail",true);dock.metricsVisible_=false;dock.settings_.setValue("showAlertIcon",true);dock.information_->hide();dock.preview_->setVisible(true);dock.previewCard_->show();dock.alertActive_=true;dock.lastAlertTitle_="Storage running low";dock.place(dock.badge_,"");
+  dock.settings_.setValue("showThumbnail",true);dock.metricsVisible_=false;dock.settings_.setValue("showAlertIcon",true);dock.information_->hide();dock.preview_->setVisible(true);dock.previewCard_->show();dock.alertActive_=true;dock.lastAlertTitle_="Storage running low";dock.alerts_.insert(dock.lastAlertTitle_,{"Low space",false});dock.place(dock.badge_,"");
   checkState(dock.badge_->width()==dock.preview_->width()+32 && dock.badge_->height()==dock.preview_->height()+32,"thumbnail card has uniform inner and outer padding");
   checkState(!dock.alertIcon_->isHidden() && dock.alertIcon_->property("alertRole").toString()=="storage","offending alert icon overlays thumbnail");
   dock.settings_.setValue("showAlertIcon",false);dock.updateAlertIcon();checkState(dock.alertIcon_->isHidden(),"alert icon option can be disabled");
-  dock.settings_.setValue("showThumbnail",false);dock.metricsVisible_=true;dock.settings_.setValue("showAlertIcon",true);dock.preview_->hide();dock.previewCard_->hide();dock.alertActive_=false;dock.activateAction(1);
+  dock.settings_.setValue("showThumbnail",false);dock.metricsVisible_=true;dock.settings_.setValue("showAlertIcon",true);dock.preview_->hide();dock.previewCard_->hide();dock.dismissAlert();dock.activateAction(1);
   checkState(!dock.findChild<QCheckBox*>("enabled"),"ambiguous Alerts panel toggle removed");
   auto *releases=dock.findChild<QLabel*>("githubReleases");
   checkState(releases && releases->openExternalLinks() &&
@@ -1037,6 +1234,7 @@ int main(int argc,char **argv){
   }
   if(qEnvironmentVariableIsEmpty("LOOKOUT_BLUR_CAPTURE")){LookoutTestAccess::exercise(dock);}
   LookoutTestAccess::iconMode(dock);
+  LookoutTestAccess::alertPresentation(dock);
   if(gpu && !qEnvironmentVariableIsEmpty("LOOKOUT_REPLAY_QA"))LookoutTestAccess::realReplay(dock);
   if(gpu && qEnvironmentVariableIsEmpty("LOOKOUT_QUICK_QA"))LookoutTestAccess::nativePanels(dock,qEnvironmentVariable("LOOKOUT_GPU_CAPTURE"));
   if(gpu)LookoutTestAccess::quickMigration(dock);

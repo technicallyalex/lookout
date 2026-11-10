@@ -11,26 +11,34 @@ Item {
         id: api
         property var settings: ({
             dark: true,
-            values: {thumbnail: false, showAlertIcon: false},
+            values: {thumbnail: false, showAlertIcon: false, textStats: true,
+                     iconVisibility: 2, graphVisibility: 0},
             statLabels: {storage: "Disk space available", encoder: "Skipped frames due to encoding lag",
                          network: "Dropped Frames (Network)"},
-            displayModeLabels: ["Icons", "Active icons", "Custom"],
-            displayModeIds: ["icons", "active-icons", "custom"],
             monitors: ["Display"],
             presets: ["Gaming"],
             shortcuts: ["Ctrl+F1"],
-            dockOptions: [{id: "settings", label: "Settings", icon: "settings"}],
-            dockOrder: ["settings"]
+            dockOptions: [{id: "settings", label: "Settings", icon: "settings"},
+                          {id: "show", label: "Show panels", icon: "show"},
+                          {id: "hide", label: "Hide panels", icon: "hide"},
+                          {id: "thumbnail", label: "Toggle thumbnail", icon: "thumbnail"}],
+            dockOrder: ["settings", "show", "hide"]
         })
         property int shortcutIndex: -1
         property string lastAction: ""
+        property string lastKey: ""
+        property var lastValue
         property bool applyEdits: false
         function setting(action, value, key) {
             lastAction = action
+            lastKey = key || ""
+            lastValue = value
             if (applyEdits && action === "set") {
                 Qt.callLater(() => {
                     const values = Object.assign({}, settings.values)
                     values[key] = value
+                    if (key === "customSizePercent")
+                        values.panelScale = 4
                     settings = Object.assign({}, settings, {values: values})
                 })
             }
@@ -77,7 +85,15 @@ Item {
             compare(settings.navigation[1], "Panels")
             compare(settings.sections[0].title, "Thumbnail")
             verify(findChild(settings, "setting_thumbnail"))
-            compare(settings.sections[1].title, "Stats")
+            compare(settings.sections[1].title, "Stats and icons")
+            verify(!findChild(settings, "setting_presentation"))
+            verify(findChild(settings, "setting_textStats"))
+            const iconVisibility = findChild(findChild(settings, "setting_iconVisibility"), "choiceControl")
+            const graphVisibility = findChild(findChild(settings, "setting_graphVisibility"), "choiceControl")
+            compare(iconVisibility.currentText, "Off")
+            compare(graphVisibility.currentText, "On")
+            for (const control of [iconVisibility, graphVisibility])
+                compare(control.model, ["On", "Active", "Off"])
             for (const id of ["storage", "encoder", "network"]) {
                 compare(findChild(settings, "setting_iconVisible/" + id).spec.label, api.settings.statLabels[id])
                 compare(findChild(settings, "setting_graph/" + id).spec.label, api.settings.statLabels[id])
@@ -103,6 +119,24 @@ Item {
             api.settings = previous
         }
 
+        function test_thumbnailPlacementOnPanels() {
+            const previous = api.settings
+            const settings = createTemporaryObject(settingsComponent, fixture, {page: 1})
+            verify(settings)
+            const panels = findChild(findChild(settings, "setting_thumbnailPosition"), "choiceControl")
+            compare(panels.currentText, "Above metrics")
+            api.applyEdits = true
+            panels.activated(3)
+            tryVerify(() => api.settings.values.thumbnailPosition === 3)
+            settings.page = 3
+            verify(!findChild(settings, "setting_thumbnailPosition"))
+            settings.page = 1
+            const restored = findChild(findChild(settings, "setting_thumbnailPosition"), "choiceControl")
+            compare(restored.currentText, "Right of metrics")
+            api.applyEdits = false
+            api.settings = previous
+        }
+
         function test_transitionPreview() {
             const settings = createTemporaryObject(settingsComponent, fixture)
             verify(settings)
@@ -125,10 +159,20 @@ Item {
             const previous = api.settings
             api.settings = Object.assign({}, previous, {values: {panelDesign: "obs", logoTheme: 1}})
             verify(field.spec.disabled)
+            verify(field.spec.note.includes("Following OBS (Dark)"))
             compare(field.current, 1)
-            api.settings = Object.assign({}, previous, {values: {panelDesign: "studio", logoTheme: 1}})
-            verify(!field.spec.disabled)
+            const colors = findChild(findChild(settings, "setting_panelDesign"), "choiceControl")
+            const appearance = findChild(field, "choiceControl")
+            api.applyEdits = true
+            colors.activated(3)
+            tryCompare(appearance, "enabled", true)
             compare(field.current, 1)
+            appearance.activated(2)
+            tryVerify(() => api.settings.values.logoTheme === 2)
+            colors.activated(0)
+            tryCompare(appearance, "enabled", false)
+            compare(field.current, 2)
+            api.applyEdits = false
             api.settings = previous
         }
 
@@ -161,6 +205,72 @@ Item {
                 compare(choice.currentText, label)
             }
             api.applyEdits = false
+            api.settings = previous
+        }
+
+        function test_customScaleCanBeEditedFromPreset() {
+            const previous = api.settings
+            api.settings = Object.assign({}, previous, {values: {panelScale: 1, customSizePercent: 86}})
+            const settings = createTemporaryObject(settingsComponent, fixture, {page: 3})
+            verify(settings)
+            const row = findChild(settings, "setting_customSizePercent")
+            const spin = findChild(row, "numberControl")
+            verify(spin.enabled && row.opacity < 1)
+            const editor = spin.contentItem
+            mouseClick(editor)
+            tryCompare(row, "opacity", 1)
+            compare(api.settings.values.panelScale, 1)
+            api.applyEdits = true
+            editor.selectAll()
+            keyClick(Qt.Key_9)
+            keyClick(Qt.Key_2)
+            keyClick(Qt.Key_Return)
+            tryVerify(() => api.settings.values.customSizePercent === 92 && api.settings.values.panelScale === 4)
+            settings.forceActiveFocus()
+            compare(row.opacity, 1)
+            api.applyEdits = false
+            api.settings = previous
+        }
+
+        function test_dockSwitchesAndDrag() {
+            const previous = api.settings
+            const settings = createTemporaryObject(settingsComponent, fixture, {page: 6})
+            verify(settings)
+            const first = findChild(settings, "dockButton_settings")
+            const last = findChild(settings, "dockButton_hide")
+            const available = findChild(settings, "dockButton_thumbnail")
+            verify(first.parent === last.parent && last.parent === available.parent)
+            verify(first.y < last.y && last.y < available.y)
+            const source = findChild(first, "dockDragHandle")
+            const destination = findChild(last, "dockDragHandle")
+            verify(source.visible && destination.visible && !findChild(available, "dockDragHandle").visible)
+            const point = destination.mapToItem(source, destination.width / 2, destination.height / 2)
+            mouseDrag(source, source.width / 2, source.height / 2,
+                      0, point.y - source.height / 2)
+            compare(api.lastAction, "dockButton")
+            compare(api.lastKey, "settings")
+            compare(api.lastValue, 2)
+            const enabled = findChild(first, "dockButtonSwitch")
+            const disabled = findChild(available, "dockButtonSwitch")
+            verify(enabled.checked && !disabled.checked)
+            mouseClick(enabled)
+            compare(api.lastValue, "remove")
+            compare(api.lastKey, "settings")
+            mouseClick(disabled)
+            compare(api.lastValue, "add")
+            compare(api.lastKey, "thumbnail")
+            const mode = findChild(settings, "dockLabelMode")
+            compare(mode.currentText, "Icons only")
+            mode.activated(1)
+            compare(api.lastAction, "dockLabels")
+            compare(api.lastValue, true)
+            api.settings = Object.assign({}, previous, {dockLabels: true,
+                dockOrder: ["hide", "thumbnail", "settings", "show"]})
+            compare(mode.currentText, "Icons and text labels")
+            const newlyEnabled = findChild(settings, "dockButton_thumbnail")
+            verify(findChild(newlyEnabled, "dockDragHandle").visible)
+            tryVerify(() => findChild(settings, "dockButton_hide").y < newlyEnabled.y &&
+                            newlyEnabled.y < findChild(settings, "dockButton_settings").y)
             api.settings = previous
         }
 

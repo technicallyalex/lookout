@@ -395,7 +395,15 @@ public:
   if(amount==0){clearBackdrops();return;}
   const auto cards=s["cards"].toArray();
   static bool registered=false;if(!registered){WNDCLASSW cls{};cls.hInstance=GetModuleHandleW(nullptr);cls.lpszClassName=L"LookoutQuickBackdrop";cls.lpfnWndProc=[](HWND hwnd,UINT message,WPARAM w,LPARAM l)->LRESULT{if(message==WM_NCCALCSIZE && w)return 0;if(message==WM_NCHITTEST)return HTTRANSPARENT;if(message==WM_MOUSEACTIVATE)return MA_NOACTIVATE;if(message==WM_PAINT){PAINTSTRUCT paint;BeginPaint(hwnd,&paint);EndPaint(hwnd,&paint);return 0;}return DefWindowProcW(hwnd,message,w,l);};registered=RegisterClassW(&cls)!=0;}
-  while(backdrops.size()>cards.size())removeBackdrop();while(registered && backdrops.size()<cards.size()){HWND w=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TRANSPARENT|WS_EX_TOPMOST|WS_EX_NOREDIRECTIONBITMAP,L"LookoutQuickBackdrop",L"",WS_POPUP|WS_THICKFRAME|WS_CAPTION,0,0,1,1,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);if(!w)break;backdrops<<w;}
+  // The blur HWND has no controls and must not participate in pointer hit tests.
+  while(backdrops.size()>cards.size())removeBackdrop();
+  while(registered && backdrops.size()<cards.size()){
+   const auto w=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TRANSPARENT|WS_EX_LAYERED|WS_EX_TOPMOST|WS_EX_NOREDIRECTIONBITMAP,
+    L"LookoutQuickBackdrop",L"",WS_POPUP|WS_DISABLED|WS_THICKFRAME|WS_CAPTION,0,0,1,1,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+   if(!w)break;
+   if(!SetLayeredWindowAttributes(w,0,255,LWA_ALPHA)){DestroyWindow(w);break;}
+   backdrops<<w;
+  }
   RECT origin{};GetWindowRect(panel,&origin);const qreal dpi=view.devicePixelRatio();
   for(int i=0;i<backdrops.size();++i){
    auto w=backdrops[i];

@@ -7,6 +7,7 @@ ColumnLayout {
     required property var controller
     required property var options
     required property var order
+    required property bool showLabels
     required property color surface
     required property color edge
     required property color ink
@@ -16,17 +17,45 @@ ColumnLayout {
     readonly property var onDock: order.map(id => options.find(option => option.id === id)).filter(Boolean)
     readonly property var available: options.filter(option => !order.includes(option.id))
 
-    component ButtonList: Rectangle {
-        id: card
-        required property bool placed
-        required property var buttons
+    RowLayout {
         Layout.fillWidth: true
-        Layout.preferredWidth: 1
-        Layout.alignment: Qt.AlignTop
+        Label {
+            text: "Button display"
+            Layout.fillWidth: true
+        }
+        ComboBox {
+            objectName: "dockLabelMode"
+            Layout.preferredWidth: 180
+            model: ["Icons only", "Icons and text labels"]
+            currentIndex: editor.showLabels ? 1 : 0
+            Accessible.name: "Button display"
+            onActivated: index => editor.controller.setting("dockLabels", index === 1)
+        }
+    }
+
+    Rectangle {
+        id: card
+        property int draggedIndex: -1
+        property int targetIndex: -1
+        Layout.fillWidth: true
         implicitHeight: rows.implicitHeight + 28
         radius: 10
         color: editor.surface
         border.color: editor.edge
+
+        function targetAt(y) {
+            for (let i = 0; i < editor.onDock.length; ++i) {
+                const row = entries.itemAt(i)
+                if (y < row.y + row.height)
+                    return i
+            }
+            return editor.onDock.length - 1
+        }
+
+        function endDrag() {
+            draggedIndex = -1
+            targetIndex = -1
+        }
 
         ColumnLayout {
             id: rows
@@ -34,82 +63,121 @@ ColumnLayout {
             anchors.margins: 14
             spacing: 6
             Label {
-                text: card.placed ? "On the dock" : "Available buttons"
+                text: "Dock buttons"
                 font.bold: true
-                Layout.bottomMargin: 4
             }
             Label {
-                visible: card.buttons.length === 0
-                text: card.placed ? "No buttons on the dock." : "All buttons are on the dock."
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
+                text: "Drag to reorder"
+                color: editor.dark ? "#b0b8c6" : "#515a67"
+                font.pixelSize: 12
+                Layout.bottomMargin: 4
             }
             Repeater {
-                model: card.buttons
-                delegate: RowLayout {
+                id: entries
+                model: editor.onDock.concat(editor.available)
+                delegate: Item {
                     id: entry
                     required property var modelData
                     required property int index
+                    readonly property bool placed: index < editor.onDock.length
                     objectName: "dockButton_" + modelData.id
                     Layout.fillWidth: true
-                    Layout.minimumHeight: 28
-                    spacing: 6
-                    Glyph {
-                        Layout.preferredWidth: 18
-                        Layout.preferredHeight: 18
-                        sourceSize: Qt.size(54, 54)
-                        role: entry.modelData.icon
-                        dark: editor.dark
-                        ink: editor.ink
+                    Layout.minimumHeight: 32
+                    implicitHeight: row.implicitHeight
+                    RowLayout {
+                        id: row
+                        anchors.fill: parent
+                        spacing: 8
+                        ToolButton {
+                            id: handle
+                            objectName: "dockDragHandle"
+                            visible: entry.placed
+                            enabled: editor.onDock.length > 1
+                            Layout.preferredWidth: 24
+                            Layout.preferredHeight: 26
+                            Accessible.name: "Reorder " + entry.modelData.label
+                            Accessible.description: "Drag or use the Up and Down keys."
+                            Keys.onUpPressed: editor.controller.setting("dockButton", "up", entry.modelData.id)
+                            Keys.onDownPressed: editor.controller.setting("dockButton", "down", entry.modelData.id)
+                            contentItem: Item {
+                                Grid {
+                                    anchors.centerIn: parent
+                                    columns: 2
+                                    spacing: 3
+                                    Repeater {
+                                        model: 6
+                                        Rectangle {
+                                            width: 3
+                                            height: 3
+                                            radius: 1.5
+                                            color: editor.ink
+                                            opacity: grip.pressed || grip.containsMouse || handle.visualFocus ? 1 : 0.55
+                                        }
+                                    }
+                                }
+                            }
+                            MouseArea {
+                                id: grip
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                preventStealing: true
+                                cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                                onPressed: {
+                                    handle.forceActiveFocus()
+                                    card.draggedIndex = entry.index
+                                    card.targetIndex = entry.index
+                                }
+                                onPositionChanged: mouse => {
+                                    if (pressed)
+                                        card.targetIndex = card.targetAt(mapToItem(rows, mouse.x, mouse.y).y)
+                                }
+                                onReleased: mouse => {
+                                    const target = card.targetAt(mapToItem(rows, mouse.x, mouse.y).y)
+                                    card.endDrag()
+                                    if (target >= 0 && target !== entry.index)
+                                        editor.controller.setting("dockButton", target, entry.modelData.id)
+                                }
+                                onCanceled: card.endDrag()
+                            }
+                        }
+                        Item {
+                            visible: !entry.placed
+                            Layout.preferredWidth: 24
+                        }
+                        Glyph {
+                            Layout.preferredWidth: 18
+                            Layout.preferredHeight: 18
+                            sourceSize: Qt.size(54, 54)
+                            role: entry.modelData.icon
+                            dark: editor.dark
+                            ink: editor.ink
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: entry.modelData.label
+                            wrapMode: Text.WordWrap
+                        }
+                        SettingsSwitch {
+                            objectName: "dockButtonSwitch"
+                            dark: editor.dark
+                            checked: entry.placed
+                            Accessible.name: "Show on dock: " + entry.modelData.label
+                            onToggled: editor.controller.setting("dockButton", checked ? "add" : "remove", entry.modelData.id)
+                        }
                     }
-                    Label {
-                        Layout.fillWidth: true
-                        text: entry.modelData.label
-                        wrapMode: Text.WordWrap
-                    }
-                    ToolButton {
-                        objectName: "moveDockButtonUp"
-                        visible: card.placed
-                        enabled: entry.index > 0
-                        Layout.preferredWidth: 26
-                        text: "↑"
-                        font.pixelSize: 16
-                        Accessible.name: "Move up: " + entry.modelData.label
-                        ToolTip.visible: hovered
-                        ToolTip.text: "Move up"
-                        onClicked: editor.controller.setting("dockButton", "up", entry.modelData.id)
-                    }
-                    ToolButton {
-                        objectName: "moveDockButtonDown"
-                        visible: card.placed
-                        enabled: entry.index + 1 < card.buttons.length
-                        Layout.preferredWidth: 26
-                        text: "↓"
-                        font.pixelSize: 16
-                        Accessible.name: "Move down: " + entry.modelData.label
-                        ToolTip.visible: hovered
-                        ToolTip.text: "Move down"
-                        onClicked: editor.controller.setting("dockButton", "down", entry.modelData.id)
-                    }
-                    Button {
-                        objectName: card.placed ? "removeDockButton" : "addDockButton"
-                        text: card.placed ? "Remove" : "Add"
-                        Accessible.name: text + " " + entry.modelData.label
-                        onClicked: editor.controller.setting("dockButton", card.placed ? "remove" : "add", entry.modelData.id)
+                    Rectangle {
+                        visible: card.targetIndex === entry.index && card.draggedIndex !== entry.index
+                        width: parent.width
+                        height: 2
+                        y: card.draggedIndex < entry.index ? parent.height + 2 : -4
+                        color: handle.palette.highlight
+                        radius: 1
                     }
                 }
             }
         }
     }
 
-    GridLayout {
-        Layout.fillWidth: true
-        columns: width >= 680 ? 2 : 1
-        columnSpacing: 12
-        rowSpacing: 12
-        ButtonList { placed: true; buttons: editor.onDock }
-        ButtonList { placed: false; buttons: editor.available }
-    }
     RowLayout {
         Layout.fillWidth: true
         Label {

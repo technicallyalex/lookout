@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 project(lookout VERSION 1.0.0 LANGUAGES CXX)
 set(LOOKOUT_VERSION "${PROJECT_VERSION}-rc.2")
-set(LOOKOUT_BUILD "2026-11-07-lookout-cleanup")
+set(LOOKOUT_BUILD "2026-11-10-rc2")
 set(CMAKE_AUTORCC ON)
 if(MSVC)
  add_compile_options(/utf-8)

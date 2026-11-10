@@ -75,18 +75,20 @@ double presetScale(int preset,QSize screen) {
  return resolution*factors[std::clamp(preset,0,3)];
 }
 int presetWidth(int preset,QSize screen){return int(std::lround(320*presetScale(preset,screen)));}
-GroupedWidths groupedWidths(int screenWidth,int panelWidth,int thumbnailWidth,
-                           int spacing,bool sideRequested,bool showMetrics,bool showThumbnail)
+GroupedWidths groupedWidths(int screenWidth,int panelWidth,int standaloneThumbnailWidth,
+                           int spacing,bool sideRequested,bool showMetrics,bool showThumbnail,bool matchWidths)
 {
  const int column=std::min(screenWidth,panelWidth);
  const int metrics=showMetrics?std::max(1,column-16):0;
  if(!showThumbnail)return {column,metrics,0,false};
- const int beside=screenWidth-column-spacing-16;
- if(sideRequested && showMetrics && beside>=std::min(80,thumbnailWidth)){
-  const int thumbnail=std::min(beside,thumbnailWidth);
-  return {column+spacing+16+thumbnail,metrics,thumbnail,true};
+ if(!showMetrics){
+  const int window=std::min(screenWidth,standaloneThumbnailWidth+32);
+  return {window,0,std::max(1,window-32),false};
  }
- const int stack=std::min(screenWidth,std::max(showMetrics?column:0,thumbnailWidth+32));
- return {stack,metrics,std::min(thumbnailWidth,std::max(1,stack-32)),false};
+ const int thumbnail=std::max(1,matchWidths?metrics-16:std::min(standaloneThumbnailWidth,screenWidth-32));
+ const int thumbnailCard=thumbnail+16;
+ const int sideWidth=column+spacing+thumbnailCard;
+ const bool alongside=sideRequested && sideWidth<=screenWidth;
+ return {alongside?sideWidth:std::max(column,thumbnailCard+16),metrics,thumbnail,alongside};
 }
 }
