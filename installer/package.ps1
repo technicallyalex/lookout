@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory)] [string] $QtSdk,
     [Parameter(Mandatory)] [string] $CrtDir,
     [Parameter(Mandatory)] [string] $QtLicenseDir,
-    [string] $Version = '1.0.0-rc.3'
+    [string] $Version = '1.0.0-rc.4'
 )
 $ErrorActionPreference = 'Stop'
 $project = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -44,7 +44,7 @@ New-Item -ItemType Directory -Path (Join-Path $ui 'licenses') | Out-Null
 foreach ($name in 'LGPL-3.0-only.txt','GPL-3.0-only.txt','GPL-2.0-only.txt') { Copy-Item -LiteralPath (Join-Path $QtLicenseDir $name) -Destination (Join-Path $ui 'licenses') }
 $manifest = [ordered]@{
     version = $Version
-    build = '2026-11-25-rc3'
+    build = '2026-11-25-rc4'
     builtUtc = [DateTime]::UtcNow.ToString('o')
     dllSha256 = (Get-FileHash -LiteralPath (Join-Path $payload 'lookout.dll')).Hash
     rendererSha256 = (Get-FileHash -LiteralPath (Join-Path $ui 'lookout-ui.exe')).Hash

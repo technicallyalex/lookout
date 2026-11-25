@@ -9,6 +9,7 @@ Item {
 
     QtObject {
         id: api
+        property string releaseNotes: "### Panel layout\n\n- Arrange panels."
         property QtObject updater: QtObject {
             property var state: ({status: "Ready", canCheck: true, canInstall: true,
                 version: "1.0.0-rc.4", notes: "Example patch notes"})
@@ -140,6 +141,23 @@ Item {
             mouseClick(findChild(settings, "installUpdate"))
             verify(api.updater.installed)
             compare(findChild(settings, "updatePatchNotes").text, "Example patch notes")
+        }
+        function test_aboutCurrentRelease() {
+            const previous = api.settings
+            const previousUpdate = api.updater.state
+            api.settings = Object.assign({}, previous, {version: "1.0.0-rc.4", build: "internal-build"})
+            api.updater.state = {status: "", canCheck: true, version: ""}
+            const settings = createTemporaryObject(settingsComponent, fixture, {page: 7})
+            compare(findChild(settings, "installedVersion").text, "lookout 1.0.0-rc.4")
+            const notes = findChild(settings, "currentPatchNotes")
+            verify(notes.visible)
+            compare(notes.text, api.releaseNotes)
+            verify(findChild(settings, "checkUpdates").visible)
+            verify(!findChild(settings, "installUpdate").visible)
+            api.updater.state = {status: "lookout is up to date.", canCheck: true, version: ""}
+            compare(notes.text, api.releaseNotes)
+            api.settings = previous
+            api.updater.state = previousUpdate
         }
 
         function test_thumbnailAlertPreview() {

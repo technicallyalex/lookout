@@ -347,22 +347,15 @@ Control {
                             dark: !!root.state.dark
                         }
                     }
-                    Label {
-                        visible: root.page === 7
-                        Layout.fillWidth: true
-                        wrapMode: Text.WordWrap
-                        text: "lookout " + (root.state.version || "") + "\n" + (root.state.build || "")
-                    }
-                    Button {
-                        visible: root.page === 7
-                        text: "GitHub Releases"
-                        onClicked: Qt.openUrlExternally("https://github.com/technicallyalex/lookout/releases")
-                    }
                     Loader {
                         active: root.page === 7
                         visible: active
                         Layout.fillWidth: true
-                        sourceComponent: UpdateSettings { updater: root.controller.updater }
+                        sourceComponent: UpdateSettings {
+                            updater: root.controller.updater
+                            currentVersion: root.state.version || ""
+                            currentNotes: root.controller.releaseNotes
+                        }
                     }
                     Item { Layout.preferredHeight: 16 }
                 }

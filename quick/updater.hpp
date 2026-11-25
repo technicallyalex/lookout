@@ -31,7 +31,7 @@ signals:
 private:
  QNetworkAccessManager network_;
  QPointer<QNetworkReply> reply_;
- QString installed_,status_="Check GitHub for a newer release.",downloadError_;
+ QString installed_,status_,downloadError_;
  Release release_;
  bool busy_=false,queued_=false;
  int progress_=-1;

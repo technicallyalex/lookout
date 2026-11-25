@@ -83,6 +83,8 @@ int main(int argc,char **argv){
  }
  check(LookoutUpdater::compareVersions("v1.0.0-rc.3+build","1.0.0-rc.3")==0,"build metadata does not create a newer release");
  check(LookoutUpdater::selectRelease({release("v1.0.0-rc.3"),release("v1.0.0-rc.2")},"1.0.0-rc.2").version=="1.0.0-rc.3","RC releases are available to the updater");
+ check(LookoutUpdater::selectRelease({release("v1.0.0-rc.3"),release("v1.0.0-rc.4")},"1.0.0-rc.3").version=="1.0.0-rc.4","RC3 discovers the RC4 installer");
+ check(LookoutUpdater::selectRelease({release("v1.0.0-rc.4")},"1.0.0-rc.4").version.isEmpty(),"RC4 does not offer itself as an update");
  check(LookoutUpdater::selectRelease({release("v1.0.0-rc.3")},"1.0.0").version.isEmpty(),"stable users cannot downgrade to an RC");
  check(LookoutUpdater::selectRelease({release("v1.0.0-rc.3"),release("v1.0.0"),release("v1.1.0")},"1.0.0-rc.3").version=="1.1.0","release selection does not depend on API ordering");
  check(LookoutUpdater::selectRelease({release("v1.0.0-rc.03")},"1.0.0-rc.2").version.isEmpty(),"invalid prerelease numbers are ignored");

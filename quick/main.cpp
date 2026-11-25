@@ -49,11 +49,16 @@ class Controller final:public QObject {
  Q_PROPERTY(QVariantMap settings READ settings NOTIFY settingsChanged)
  Q_PROPERTY(int shortcutIndex READ shortcutIndex NOTIFY shortcutChanged)
  Q_PROPERTY(QObject* updater READ updater CONSTANT)
+ Q_PROPERTY(QString releaseNotes READ releaseNotes CONSTANT)
 public:
  QQuickView view;
  LookoutUpdater updater_;
  quint32 updaterParent_=0;
  QObject *updater(){return &updater_;}
+ QString releaseNotes() const {
+  QFile notes(":/quick/release-notes.md");
+  return notes.open(QIODevice::ReadOnly)?QString::fromUtf8(notes.readAll()):QString();
+ }
  std::unique_ptr<QQuickView> settingsView;
  HICON settingsCaptionIcon=nullptr;
  std::optional<bool> settingsIconDark;
