@@ -9,6 +9,14 @@ Item {
 
     QtObject {
         id: api
+        property QtObject updater: QtObject {
+            property var state: ({status: "Ready", canCheck: true, canInstall: true,
+                version: "1.0.0-rc.4", notes: "Example patch notes"})
+            property bool checked: false
+            property bool installed: false
+            function check() { checked = true }
+            function install() { installed = true }
+        }
         property var settings: ({
             dark: true,
             values: {thumbnail: false, showAlertIcon: false, textStats: true,
@@ -48,6 +56,22 @@ Item {
     Component {
         id: settingsComponent
         Lookout.Settings { width: 1080; height: 800; controller: api }
+    }
+
+    Component {
+        id: panelOrderComponent
+        Lookout.DockSettings {
+            width: 500
+            panelEditor: true
+            controller: api
+            options: api.settings.panelOptions || []
+            order: api.settings.panelOrder || []
+            showLabels: false
+            surface: "#24272d"
+            edge: "#474f5b"
+            ink: "#f1f3f7"
+            dark: true
+        }
     }
 
     Component {
@@ -101,6 +125,21 @@ Item {
             verify(!settings.twoColumns)
             settings.width = 1080
             verify(settings.twoColumns)
+        }
+
+        function test_hoverSetting() {
+            const settings = createTemporaryObject(settingsComponent, fixture, {page: 0})
+            const field = findChild(settings, "setting_hideOnHover")
+            verify(field && field.spec.kind === "toggle")
+            compare(field.spec.label, "Fade hovered panel")
+        }
+        function test_updateControls() {
+            const settings = createTemporaryObject(settingsComponent, fixture, {page: 7})
+            mouseClick(findChild(settings, "checkUpdates"))
+            verify(api.updater.checked)
+            mouseClick(findChild(settings, "installUpdate"))
+            verify(api.updater.installed)
+            compare(findChild(settings, "updatePatchNotes").text, "Example patch notes")
         }
 
         function test_thumbnailAlertPreview() {
@@ -271,6 +310,34 @@ Item {
             verify(findChild(newlyEnabled, "dockDragHandle").visible)
             tryVerify(() => findChild(settings, "dockButton_hide").y < newlyEnabled.y &&
                             newlyEnabled.y < findChild(settings, "dockButton_settings").y)
+            api.settings = previous
+        }
+
+        function test_panelOrderDragAndKeyboard() {
+            const previous = api.settings
+            api.settings = Object.assign({}, previous, {
+                panelOptions: [{id: "stats", label: "Text stats", icon: "stats"},
+                               {id: "alert", label: "Alerts", icon: "alerts"},
+                               {id: "thumbnail", label: "Thumbnail", icon: "thumbnail"}],
+                panelOrder: ["stats", "alert", "thumbnail"]})
+            const settings = createTemporaryObject(panelOrderComponent, fixture)
+            verify(settings)
+            const first = findChild(settings, "panelOrder_stats")
+            const last = findChild(settings, "panelOrder_thumbnail")
+            const source = findChild(first, "panelDragHandle")
+            const target = findChild(last, "panelDragHandle")
+            verify(source.visible && target.visible)
+            verify(!findChild(first, "dockButtonSwitch").visible)
+            const point = target.mapToItem(source, target.width / 2, target.height / 2)
+            mouseDrag(source, source.width / 2, source.height / 2, 0, point.y - source.height / 2)
+            compare(api.lastAction, "panelOrder")
+            compare(api.lastKey, "stats")
+            compare(api.lastValue, 2)
+            source.forceActiveFocus()
+            keyClick(Qt.Key_Down)
+            compare(api.lastValue, "down")
+            mouseClick(findChild(settings, "resetPanelOrder"))
+            compare(api.lastValue, "reset")
             api.settings = previous
         }
 

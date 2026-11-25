@@ -28,6 +28,7 @@
 #include <shellapi.h>
 #endif
 #include <QRegularExpression>
+#include <QJsonDocument>
 #include <util/config-file.h>
 #include <algorithm>
 #include <array>
@@ -320,6 +321,84 @@ struct LookoutTestAccess {
   }
   SetCursorPos(savedPointer.x,savedPointer.y);
   backdrop.unsetCursor();
+  const HWND previousForeground=GetForegroundWindow();
+  QWidget hoverApp;
+  hoverApp.setWindowFlags(Qt::Tool|Qt::FramelessWindowHint|Qt::WindowStaysOnTopHint);
+  const QRect display=QGuiApplication::primaryScreen()->geometry();
+  const QRect desktopWindow=display.adjusted(0,0,-display.width()/4,-display.height()/4);
+  hoverApp.setGeometry(desktopWindow);hoverApp.show();hoverApp.raise();hoverApp.activateWindow();
+  const HWND hoverWindow=reinterpret_cast<HWND>(hoverApp.winId());
+  SetForegroundWindow(hoverWindow);
+  if(GetForegroundWindow()!=hoverWindow){
+   const DWORD foregroundThread=GetWindowThreadProcessId(GetForegroundWindow(),nullptr);
+   const DWORD testThread=GetCurrentThreadId();
+   const bool attached=foregroundThread!=testThread && AttachThreadInput(testThread,foregroundThread,TRUE);
+   SetForegroundWindow(hoverWindow);
+   if(attached)AttachThreadInput(testThread,foregroundThread,FALSE);
+  }
+  wait(100);
+  checkState(GetForegroundWindow()==hoverWindow,"activate a normal desktop window for hover QA");
+  SetCursorPos(outsidePanel.x,outsidePanel.y);
+  dock.settings_.setValue("hideOnHover",true);dock.settings_.setValue("blurAmount",50);
+  dock.notify("Encoder overload","Hover test",true);dock.settings_.setValue("untilDismiss",true);
+  dock.refreshPanel();wait(250);
+  GetWindowRect(target.window,&panelRect);
+  const auto hoverLocal=dock.stats_->mapTo(dock.badge_,dock.stats_->rect().center());
+  const POINT hoverPoint{panelRect.left+qRound(hoverLocal.x()*dpi),panelRect.top+qRound(hoverLocal.y()*dpi)};
+  struct HoverBackdrop{DWORD pid;POINT point;HWND window=nullptr;} hoverBackdrop{target.pid,hoverPoint};
+  EnumWindows([](HWND window,LPARAM data)->BOOL{
+   auto *state=reinterpret_cast<HoverBackdrop*>(data);DWORD pid=0;GetWindowThreadProcessId(window,&pid);
+   wchar_t name[64]{};GetClassNameW(window,name,64);RECT bounds{};
+   if(pid==state->pid && wcscmp(name,L"LookoutQuickBackdrop")==0 && GetWindowRect(window,&bounds) && PtInRect(&bounds,state->point))state->window=window;
+   return TRUE;
+  },reinterpret_cast<LPARAM>(&hoverBackdrop));
+  checkState(hoverBackdrop.window,"identify the stats card's blur surface");
+  SetCursorPos(hoverPoint.x,hoverPoint.y);
+  bool sawFade=false;
+  for(int sample=0;sample<20 && !sawFade;++sample){
+   wait(15);BYTE alpha=255;DWORD flags=0;
+   sawFade=GetLayeredWindowAttributes(hoverBackdrop.window,nullptr,&alpha,&flags) && alpha>0 && alpha<255;
+  }
+  checkState(sawFade,"the hovered card's blur fades through intermediate opacity levels");
+  wait(250);
+  checkState(dock.quick_->hoveredCard_=="stats:stats" && IsWindowVisible(target.window) && dock.quick_->thumbnail_ && dock.alertActive_,
+             "hover hides only the stats card while preserving the thumbnail and alerts");
+  int hoverSurfaces=0;QPair<DWORD,int*> hoverState(target.pid,&hoverSurfaces);
+  EnumWindows([](HWND window,LPARAM data)->BOOL{
+   auto *state=reinterpret_cast<QPair<DWORD,int*>*>(data);DWORD pid=0;GetWindowThreadProcessId(window,&pid);
+   if(pid==state->first && IsWindowVisible(window))++*state->second;
+   return TRUE;
+  },reinterpret_cast<LPARAM>(&hoverState));
+  checkState(hoverSurfaces>1 && !IsWindowVisible(hoverBackdrop.window),"only the hovered card's blur surface disappears");
+  const auto hoverScene=QJsonDocument::fromJson(dock.quick_->lastScene_).object();int hiddenCards=0;
+  for(const auto &entry:hoverScene["cards"].toArray())hiddenCards+=entry.toObject()["hoverHidden"].toBool();
+  checkState(hiddenCards==1,"the renderer receives exactly one faded card");
+  wait(300);checkState(!IsWindowVisible(hoverBackdrop.window),"hidden card bounds prevent flickering while the pointer stays still");
+  const auto thumbnailLocal=dock.previewCard_->mapTo(dock.badge_,dock.previewCard_->rect().center());
+  SetCursorPos(panelRect.left+qRound(thumbnailLocal.x()*dpi),panelRect.top+qRound(thumbnailLocal.y()*dpi));wait(300);
+  checkState(dock.quick_->hoveredCard_=="thumbnail:thumbnail" && !dock.quick_->thumbnail_ && IsWindowVisible(hoverBackdrop.window),
+             "moving onto the thumbnail restores stats and pauses only the hidden thumbnail");
+  SetCursorPos(hoverPoint.x,hoverPoint.y);wait(300);
+  dock.setEditMode(true);wait(250);
+  checkState(IsWindowVisible(hoverBackdrop.window) && dock.quick_->hoveredCard_.isEmpty(),"placement editing overrides hover hiding");
+  dock.setEditMode(false);wait(350);
+  checkState(!IsWindowVisible(hoverBackdrop.window),"hover hiding resumes when placement editing ends");
+  int cursorHides=0;do{++cursorHides;}while(ShowCursor(FALSE)>=0);
+  wait(350);
+  const bool visibleWithHiddenCursor=IsWindowVisible(hoverBackdrop.window) && dock.quick_->hoveredCard_.isEmpty();
+  while(cursorHides-->0)ShowCursor(TRUE);
+  checkState(visibleWithHiddenCursor,"a hidden game cursor leaves monitoring panels visible");
+  hoverApp.setGeometry(QGuiApplication::primaryScreen()->geometry());wait(350);
+  checkState(IsWindowVisible(hoverBackdrop.window) && dock.quick_->hoveredCard_.isEmpty(),"fullscreen foreground apps are exempt from hover hiding");
+  hoverApp.setGeometry(desktopWindow);wait(350);
+  checkState(!IsWindowVisible(hoverBackdrop.window),"returning to a desktop window restores hover hiding");
+  SetCursorPos(panelRect.left-24,hoverPoint.y);wait(350);
+  checkState(IsWindowVisible(hoverBackdrop.window) && dock.quick_->thumbnail_,"leaving the panel restores the card and live thumbnail");
+  SetCursorPos(hoverPoint.x,hoverPoint.y);wait(250);
+  dock.settings_.setValue("hideOnHover",false);dock.quick_->publish();wait(300);
+  checkState(IsWindowVisible(hoverBackdrop.window) && dock.quick_->hoveredCard_.isEmpty(),"disabling hover hiding restores the card under the pointer");
+  dock.dismissAlert();hoverApp.hide();SetForegroundWindow(previousForeground);SetCursorPos(savedPointer.x,savedPointer.y);
+  std::puts("PASS: individual card hover fading, game cursor and fullscreen exemptions, placement editing and surface restoration");
   const auto stripePoint=[&](int x){
    return dock.badge_->pos()+dock.stats_->mapTo(dock.badge_,QPoint(x,dock.stats_->height()/2));
   };
@@ -591,6 +670,28 @@ struct LookoutTestAccess {
   checkState(!IsWindowVisible(target.window),"a privacy change immediately clears any outgoing frame");
   dock.quick_->settingsCommand({{"action","set"},{"key","panelTransition"},{"value","instant"}});
   dock.activateAction(0);wait(250);
+  dock.settings_.setValue("statsDisplay",0);dock.settings_.setValue("textStats",true);
+  dock.settings_.setValue("iconVisibility",2);dock.settings_.setValue("graphVisibility",0);
+  dock.settings_.setValue("showThumbnail",true);dock.settings_.setValue("untilDismiss",true);
+  dock.settings_.setValue("graph/encoder",2);dock.settings_.setValue("graph/memory",1);
+  dock.quick_->settingsCommand({{"action","panelOrder"},{"key","stats"},{"value",0}});
+  dock.quick_->settingsCommand({{"action","panelOrder"},{"key","alert"},{"value",1}});
+  dock.notify("Encoder overload","Sorting preview",true);wait(300);
+  const auto sortedScene=dock.quick_->snapshot();QMap<QString,QJsonObject> sortedCards;
+  for(const auto &entry:sortedScene["cards"].toArray()){
+   const auto card=entry.toObject();const auto id=card["id"].toString();
+   checkState(!sortedCards.contains(id),"sorted QML cards have independent transform identities");sortedCards[id]=card;
+  }
+  checkState(sortedCards.contains("stats") && sortedCards.contains("alert") && sortedCards.contains("encoder"),
+             "the QML renderer receives sorted stats, alerts and graph cards");
+  double previousBottom=-INFINITY;
+  for(const auto &id:dock.panelOrder())if(sortedCards.contains(id) && id!="thumbnail"){
+   const auto card=sortedCards[id];checkState(card["y"].toDouble()>=previousBottom,"QML card positions follow the saved order");
+   previousBottom=card["y"].toDouble()+card["h"].toDouble();
+  }
+  grab(".qml-sorted-panels");
+  dock.quick_->settingsCommand({{"action","panelOrder"},{"value","reset"}});
+  dock.dismissAlert();wait(150);
   const auto oldPid=dock.quick_->process_.processId();dock.quick_->process_.kill();dock.quick_->process_.waitForFinished(1000);wait(2000);checkState(dock.quick_->connected() && dock.quick_->process_.processId()!=oldPid,"renderer restarts after an isolated failure without restarting OBS");if(!dock.quick_->diagnostic_.isEmpty())std::fprintf(stderr,"Renderer diagnostics: %s\n",dock.quick_->diagnostic_.constData());checkState(dock.quick_->diagnostic_.isEmpty(),"QML settings, designs and presentation switches produce no runtime warnings");std::puts("PASS: QML settings, scene thumbnail, capture privacy, blur, transforms, five designs, formats and renderer recovery");
 #endif
   delete dock.quick_;dock.quick_=nullptr;dock.quickVisible_=false;dock.badge_->setProperty("quickModel",false);dock.glowPreviewUntil_=0;dock.dismissAlert();dock.settings_.clear();for(auto it=saved.cbegin();it!=saved.cend();++it)dock.settings_.setValue(it.key(),it.value());dock.refreshPanel();
@@ -859,6 +960,62 @@ struct LookoutTestAccess {
   const double previousScale=dock.panelScale();const int previousWidth=dock.stats_->width();const int previousReplay=dock.replay_->width();QWidget *resize=dock.stats_;const QPointF corner=resize->rect().bottomRight()-QPoint(2,2),global=resize->mapToGlobal(corner.toPoint());QMouseEvent press(QEvent::MouseButtonPress,corner,global,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(resize,&press);checkState(dock.resizing_,"card corner exposes a resize transform while settings is open");QMouseEvent move(QEvent::MouseMove,corner+QPointF(40,20),global+QPointF(40,20),Qt::NoButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(resize,&move);QMouseEvent release(QEvent::MouseButtonRelease,corner+QPointF(40,20),global+QPointF(40,20),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);QApplication::sendEvent(resize,&release);checkState(!dock.resizing_ && !dock.dragging_ && dock.panelScale()==previousScale && dock.stats_->width()>previousWidth && dock.replay_->width()==previousReplay,"individual resize changes only the selected card width");
   dock.settings_.setValue("offsetX",10000);dock.settings_.setValue("offsetY",10000);dock.place(dock.badge_,"");checkState(dock.cardGeometry_["stats"].width()>=160,"large insets cannot collapse card widths");
   dock.settings_.clear();for(auto it=saved.cbegin();it!=saved.cend();++it)dock.settings_.setValue(it.key(),it.value());dock.settings_.sync();dock.recordingActive_=rec;dock.streamingActive_=stream;dock.recordingBitrate_=recRate;dock.streamingBitrate_=streamRate;for(auto *box:dock.dialog_->findChildren<QCheckBox*>())if(saved.contains(box->objectName())){QSignalBlocker guard(box);box->setChecked(saved.value(box->objectName()).toBool());}dock.syncVisibilityControls();dock.syncGeometryControls();dock.refreshPanel();
+ }
+ static void panelSorting(LookoutDock &dock){
+  QVariantMap saved;for(const auto &key:dock.settings_.allKeys())saved[key]=dock.settings_.value(key);
+  dock.dismissAlert();dock.setEditMode(false);
+  dock.settings_.setValue("panelMode",1);dock.settings_.setValue("showInCaptures",true);
+  dock.settings_.setValue("independentCards",false);dock.settings_.setValue("showThumbnail",true);
+  dock.settings_.setValue("textStats",true);dock.settings_.setValue("iconVisibility",2);
+  dock.settings_.setValue("graphVisibility",0);dock.settings_.setValue("untilDismiss",true);
+  dock.settings_.setValue("cardSpacing",11);dock.metricsVisible_=true;
+  for(const auto &metric:HistoryGraphs::metrics)dock.settings_.setValue(QString("graph/")+metric.id,0);
+  dock.settings_.setValue("graph/encoder",2);dock.settings_.setValue("graph/memory",1);
+  dock.settings_.setValue("graph/bitrate",0);dock.settings_.setValue("graph/replay",0);
+  dock.settings_.setValue("panelOrder",QStringList{"unknown","stats","stats","memory"});
+  checkState(dock.panelOrder().size()==12 && dock.panelOrder().first()=="stats" && dock.panelOrder()[1]=="memory",
+             "panel order ignores unknown and duplicate entries and restores missing cards");
+  dock.editPanelOrder("thumbnail","move",2);dock.editPanelOrder("alert","move",1);
+  const auto order=dock.panelOrder();
+  dock.notify("Encoder overload","Test alert",true);
+  for(int preset=0;preset<5;++preset){
+   dock.applyScalePreset(preset);
+   for(int position=0;position<4;++position){
+    dock.settings_.setValue("thumbnailPosition",position);dock.refreshPanel();
+    const auto cards=dock.visibleCardRects();
+    checkState(cards.contains("stats") && cards.contains("alert") && cards.contains("thumbnail") &&
+               cards.contains("memory") && cards.contains("encoder"),"every enabled card survives sorted layout changes");
+    double bottom=-INFINITY;
+    for(const auto &id:order)if(cards.contains(id) && !(position>=2 && id=="thumbnail")){
+     checkState(cards[id].top()>=bottom,"sorted cards preserve their spacing at every scale and thumbnail placement");
+     bottom=cards[id].bottom()+10;
+    }
+    checkState(cards["memory"].top()<cards["encoder"].top(),"individual graph cards follow the saved order");
+   }
+  }
+  dock.settings_.setValue("thumbnailPosition",0);dock.refreshPanel();
+  checkState(!dock.independentLayout_ && !dock.badge_->layout()->isEnabled(),"sorting keeps grouped movement with stable widget ownership");
+  dock.settings_.setValue("textStats",false);dock.dismissAlert();dock.refreshPanel();
+  checkState(!dock.visibleCardRects().contains("stats") && !dock.visibleCardRects().contains("alert") && dock.panelOrder()==order,
+             "hidden cards retain their order without empty card slots");
+  dock.settings_.setValue("textStats",true);dock.notify("Encoder overload","Test alert",true);
+  checkState(dock.visibleCardRects()["stats"].top()<dock.visibleCardRects()["alert"].top(),"restored stats and alerts return to their saved slots");
+  dock.savePreset("QA sorted panels");dock.editPanelOrder("","reset");
+  checkState(dock.loadPreset("QA sorted panels") && dock.panelOrder()==order,"position presets preserve the panel order");
+  dock.settings_.sync();QSettings persisted(dock.settings_.fileName(),QSettings::IniFormat);
+  checkState(persisted.value("panelOrder").toStringList()==order,"panel order is saved for the next OBS launch");
+  dock.settings_.setValue("independentCards",true);dock.settings_.remove("cardPositions");dock.refreshPanel();
+  checkState(dock.independentLayout_ && dock.visibleCardRects()["stats"].top()<dock.visibleCardRects()["alert"].top(),
+             "individually movable cards use the saved order for automatic positions");
+  dock.settings_.setValue("cardPositions",QVariantMap{{"stats",QPointF(.3,.7)}});
+  dock.editPanelOrder("memory","move",0);
+  checkState(!dock.settings_.contains("cardPositions") && dock.panelOrder().first()=="memory",
+             "reordering individual cards applies the new layout instead of retaining conflicting positions");
+  dock.settings_.setValue("independentCards",false);dock.editPanelOrder("","reset");
+  checkState(dock.badge_->layout()->isEnabled() && !dock.graphs_->isHidden(),"restoring defaults recovers the original grouped layout");
+  dock.dismissAlert();dock.settings_.clear();
+  for(auto it=saved.cbegin();it!=saved.cend();++it)dock.settings_.setValue(it.key(),it.value());
+  dock.settings_.sync();dock.refreshPanel();
  }
  static void exercise(LookoutDock &dock){
   const char *dockButtons[]={"showPanels","hidePanels","cycleDefaultPositions","cyclePositionPresets","displayMode","lookoutSettings"};
@@ -1235,6 +1392,7 @@ int main(int argc,char **argv){
   if(qEnvironmentVariableIsEmpty("LOOKOUT_BLUR_CAPTURE")){LookoutTestAccess::exercise(dock);}
   LookoutTestAccess::iconMode(dock);
   LookoutTestAccess::alertPresentation(dock);
+  LookoutTestAccess::panelSorting(dock);
   if(gpu && !qEnvironmentVariableIsEmpty("LOOKOUT_REPLAY_QA"))LookoutTestAccess::realReplay(dock);
   if(gpu && qEnvironmentVariableIsEmpty("LOOKOUT_QUICK_QA"))LookoutTestAccess::nativePanels(dock,qEnvironmentVariable("LOOKOUT_GPU_CAPTURE"));
   if(gpu)LookoutTestAccess::quickMigration(dock);

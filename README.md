@@ -20,6 +20,8 @@ An OBS plugin with customizable overlays to show the Preview, statics, graphs, a
 - **Alerts you can act on.** Set thresholds for low recording storage, encoder overload, and dropped stream frames. Get notified about connection interruptions and when recording, streaming, or the virtual camera starts or stops. Preview alerts in settings, tune the glow on the affected card, and choose whether alerts stay until dismissed.
 - **Make it fit your setup.** Move and resize cards, snap them to each other or the screen edges, and save layouts as presets. Follow your OBS theme or pick a color palette, then adjust chart styles, opacity, and blur. Pick Instant, Fade, Flash, Slide, Blur, or Fall for show and hide transitions. In Fall mode, cards bounce off each other and the display edges as they exit.
 - **Control it from OBS.** Customize the dock with icons or labeled buttons to show or hide panels, cycle positions and presets, or change the display mode. Assign lookout shortcuts through OBS’s built-in hotkey system.
+- **Arrange panels and fade hovered cards.** Drag the panel order list to arrange stats, alerts, icons, graphs, and the thumbnail. On the desktop, optionally fade the card under the mouse along with its glow and blur.
+- **Update from settings.** Check for new releases in About, read the patch notes, and download a verified installer that runs after OBS closes.
 - **Designed for low overhead.** The thumbnail uses a shared GPU texture and pauses live frame transfers when hidden. The overlay runs outside the game process.
 
 <details>
@@ -55,6 +57,10 @@ Use the installer when upgrading from Release Candidate 1. It replaces the earli
 1. Open **Tools → lookout Settings** to choose what to show and when.
 2. Open **Docks → lookout** for quick access to the panel controls.
 3. In **Placement**, turn on **Edit panel placement** to drag or resize the cards. Save the layout as a preset if you want to switch back to it later.
+
+## Updates
+
+Open **About → Check for updates**. lookout checks the official GitHub repository for newer Windows releases, including release candidates. Review the patch notes, then choose **Download and install after OBS closes**. The installer downloads and verifies first. Close OBS when your recording, stream, or replay session is safe to stop, and wait for the installer to finish before reopening OBS. Your saved settings and layouts carry over.
 
 ## Game and capture compatibility
 

@@ -513,6 +513,7 @@ void LookoutDock::event(obs_frontend_event e, void *data) {
 }
 void LookoutDock::place(QWidget *window,const QString &prefix){
  if(independentLayout_){placeIndependent();return;}
+ if(settings_.contains("panelOrder")){placeOrdered();return;}
  auto screens=QGuiApplication::screens();
  auto *screen=screens.value(settings_.value(prefix+"monitor",0).toInt(),QGuiApplication::primaryScreen());
  if(!screen)return;
@@ -793,9 +794,9 @@ void LookoutDock::refreshPanel(){
  updateStats();updateStatusIcons();activeIcons_->setVisible(showMetrics && activeIcons_->iconCount()>0);
  stats_->setVisible(textStatsEnabled() && anyStatus && (showMetrics || (previewing && !alertPreview)));
  replay_->setVisible(showMetrics && visibleGraphMode("replay")!=GraphOff);
- graphs_->setVisible(showMetrics && graphsEnabled() && !independentLayout_);
+ graphs_->setVisible(showMetrics && graphsEnabled() && !separateGraphCards());
  for(int metric=0;metric<HistoryGraphs::Count;++metric)
-  graphViews_[metric]->setVisible(independentLayout_ && showMetrics && visibleGraphMode(HistoryGraphs::metrics[metric].id)!=GraphOff);
+  graphViews_[metric]->setVisible(separateGraphCards() && showMetrics && visibleGraphMode(HistoryGraphs::metrics[metric].id)!=GraphOff);
  updateBitrateCard();
  QStringList callouts;for(auto it=alerts_.cbegin();it!=alerts_.cend();++it){QString detail=it->text.toHtmlEscaped();detail.replace("\n","<br/>");callouts<<"<b>"+it.key().toHtmlEscaped()+"</b><br/>"+detail;}
  if(alertPreview)callouts<<"<b>Preview · "+previewAlertTitle_.toHtmlEscaped()+"</b><br/>"+previewAlertBody_.toHtmlEscaped();
@@ -1113,6 +1114,7 @@ void LookoutDock::savePreset(const QString &name){
  if(transformTimer_.isActive()){transformTimer_.stop();saveTransform();}
  auto list=settings_.value("positionPresets").toList();
  QVariantMap item;item["name"]=name;
+ if(settings_.contains("panelOrder"))item["panelOrder"]=panelOrder();
  const QVariantMap defaults={{"monitor",0},{"corner",1},{"offsetX",24},{"offsetY",24},{"panelWidth",520},{"thumbnailWidth",320},{"thumbnailPosition",0},{"customPosition",false},{"positionX",0},{"positionY",0},{"cardPositions",QVariantMap()},{"cardWidths",QVariantMap()},{"independentCards",false},{"panelScale",1},{"customScale",1.0},{"customSizePercent",100},{"customPanelWidth",336},{"customThumbnailWidth",304},{"cardSpacing",8},{"snapDistance",12},{"snapCards",true},{"snapScreen",true}};
  for(auto it=defaults.cbegin();it!=defaults.cend();++it)item[it.key()]=settings_.value(it.key(),it.value());
  for(int i=list.size()-1;i>=0;--i)if(list[i].toMap().value("name").toString()==name)list.removeAt(i);
@@ -1129,13 +1131,15 @@ bool LookoutDock::loadPreset(const QString &name){
  transformTimer_.stop();dragging_=false;
  for(const auto &entry:settings_.value("positionPresets").toList()){auto item=entry.toMap();if(item.value("name").toString()!=name)continue;
   if(!item.contains("cardWidths"))settings_.remove("cardWidths");
+  if(!item.contains("panelOrder"))settings_.remove("panelOrder");
   for(auto it=item.cbegin();it!=item.cend();++it)if(it.key()!="name")settings_.setValue(it.key(),it.value());
   settings_.setValue("lastPositionPreset",name);settings_.sync();syncGeometryControls();refreshPanel();return true;
  }return false;
 }
 QMap<QString,QRectF> LookoutDock::visibleCardRects() const {
- QMap<QString,QRectF> result;for(const auto &entry:{qMakePair(QString("thumbnail"),previewCard_),qMakePair(QString("alert"),static_cast<QWidget*>(badgeText_)),qMakePair(QString("stats"),stats_),qMakePair(QString("bitrate"),static_cast<QWidget*>(bitrates_)),qMakePair(QString("replay"),static_cast<QWidget*>(replay_)),qMakePair(QString("active-icons"),static_cast<QWidget*>(activeIcons_))})if(entry.second->isVisibleTo(badge_))result[entry.first]=QRectF(entry.second->mapToGlobal(QPoint()),entry.second->size());
- for(int metric=0;metric<HistoryGraphs::Count;++metric){auto *view=independentLayout_?graphViews_[metric]:graphs_;if(view->isVisibleTo(badge_)){const auto rect=view->metricRect(metric);if(!rect.isEmpty())result[HistoryGraphs::metrics[metric].card]=rect.translated(view->mapToGlobal(QPoint()));}}
+ const QPoint origin=badge_->mapToGlobal(QPoint());
+ QMap<QString,QRectF> result;for(const auto &entry:{qMakePair(QString("thumbnail"),previewCard_),qMakePair(QString("alert"),static_cast<QWidget*>(badgeText_)),qMakePair(QString("stats"),stats_),qMakePair(QString("bitrate"),static_cast<QWidget*>(bitrates_)),qMakePair(QString("replay"),static_cast<QWidget*>(replay_)),qMakePair(QString("active-icons"),static_cast<QWidget*>(activeIcons_))})if(entry.second->isVisibleTo(badge_))result[entry.first]=QRectF(origin+entry.second->mapTo(badge_,QPoint()),entry.second->size());
+ for(int metric=0;metric<HistoryGraphs::Count;++metric){auto *view=separateGraphCards()?graphViews_[metric]:graphs_;if(view->isVisibleTo(badge_)){const auto rect=view->metricRect(metric);if(!rect.isEmpty())result[HistoryGraphs::metrics[metric].card]=rect.translated(origin+view->mapTo(badge_,QPoint()));}}
  return result;
 }
 void LookoutDock::enableQuickRenderer(const QString &executable){
@@ -1185,17 +1189,112 @@ void LookoutDock::applyCustomSize(){
 void LookoutDock::rememberCustomSize(){
  const double scale=settings_.value("panelScale",1).toInt()==4?settings_.value("customScale",1).toDouble():panelScale();settings_.setValue("customScale",scale);settings_.setValue("panelScale",4);settings_.setValue("customPanelWidth",settings_.value("panelWidth",336));settings_.setValue("customThumbnailWidth",settings_.value("thumbnailWidth",304));settings_.setValue("customSizePercent",std::clamp(int(std::round(scale*100)),45,300));
 }
+QStringList LookoutDock::panelOrder() const {
+ QStringList defaults{"thumbnail","alert","stats","active-icons","bitrate","replay"};
+ for(const auto &metric:HistoryGraphs::metrics)defaults.append(metric.card);
+ if(settings_.value("thumbnailPosition",0).toInt()==1)defaults.move(0,defaults.size()-1);
+ QStringList order;
+ for(const auto &id:settings_.value("panelOrder").toStringList())
+  if(defaults.contains(id) && !order.contains(id))order.append(id);
+ for(const auto &id:defaults)if(!order.contains(id))order.append(id);
+ return order;
+}
+bool LookoutDock::separateGraphCards() const {
+ return independentLayout_ || settings_.contains("panelOrder");
+}
+void LookoutDock::editPanelOrder(const QString &id,const QString &operation,int target){
+ if(operation=="reset"){
+  settings_.remove("panelOrder");
+  if(settings_.value("thumbnailPosition",0).toInt()==4)settings_.setValue("thumbnailPosition",0);
+ }
+ else {
+  auto order=panelOrder();
+  const int index=order.indexOf(id);
+  if(index<0)return;
+  if(operation=="up")target=index-1;
+  else if(operation=="down")target=index+1;
+  else if(operation!="move")return;
+  if(target<0 || target>=order.size() || target==index)return;
+  order.move(index,target);
+  settings_.setValue("panelOrder",order);
+  if(id=="thumbnail" || settings_.value("thumbnailPosition",0).toInt()<2)settings_.setValue("thumbnailPosition",4);
+ }
+ if(independentLayout_)settings_.remove("cardPositions");
+ settings_.sync();refreshPanel();
+}
+void LookoutDock::placeOrdered(){
+ auto *screen=QGuiApplication::screens().value(settings_.value("monitor",0).toInt(),QGuiApplication::primaryScreen());
+ if(!screen)return;
+ placing_=true;
+ badge_->ensurePolished();
+ const QRect available=screen->availableGeometry();
+ const int spacing=panelLayout_->spacing(),halo=overlayPadding();
+ const int position=settings_.value("thumbnailPosition",0).toInt();
+ const auto widgets=movableCards();
+ const bool showThumbnail=widgets.contains("thumbnail");
+ const bool showMetrics=widgets.size()>(showThumbnail?1:0);
+ int panelWidth=std::clamp(settings_.value("panelWidth",520).toInt(),128,960);
+ if(iconStripMode() && badgeText_->isHidden())panelWidth=std::max(32,activeIcons_->maximumWidth()+16);
+ const auto widths=LookoutLayout::groupedWidths(available.width(),panelWidth,
+  std::clamp(settings_.value("thumbnailWidth",320).toInt(),80,800),spacing,
+  position==2 || position==3,showMetrics,showThumbnail,!iconStripMode());
+ layoutStats(widths.metrics);
+ statsLayout_->invalidate();stats_->updateGeometry();
+ if(showThumbnail)layoutThumbnail(widths.thumbnail+16,widths.thumbnail);
+ QMap<QString,QRect> rectangles;
+ int y=0;
+ for(const auto &id:panelOrder()){
+  auto *widget=widgets.value(id);
+  if(!widget || (id=="thumbnail" && widths.alongside))continue;
+  widget->ensurePolished();
+  const int width=id=="thumbnail"?widget->width():
+   id=="active-icons"?std::min(widths.metrics,activeIcons_->maximumWidth()):widths.metrics;
+  const int height=id=="thumbnail"?widget->height():id=="stats"?statsLayout_->sizeHint().height():widget->heightForWidth(width);
+  rectangles[id]=QRect(0,y,width,std::max(16,height));
+  y+=rectangles[id].height()+spacing;
+ }
+ const int corner=std::clamp(settings_.value("corner",1).toInt(),0,3);
+ const int contentHeight=std::max(std::max(0,y-spacing),widths.alongside?previewCard_->height():0);
+ const int contentWidth=widths.window-16;
+ if(widths.alongside)rectangles["thumbnail"]=QRect(0,0,previewCard_->width(),previewCard_->height());
+ for(auto it=rectangles.begin();it!=rectangles.end();++it){
+  int x=corner%2?contentWidth-it->width():0;
+  if(widths.alongside)x=it.key()=="thumbnail"?(position==2?0:widths.metrics+spacing):
+   (position==2?previewCard_->width()+spacing:0)+(corner%2?widths.metrics-it->width():0);
+  it->moveLeft(x+8+halo);it->translate(0,8+halo);
+ }
+ const QSize size(widths.window+2*halo,contentHeight+16+2*halo);
+ const int insetX=std::max(0,settings_.value("offsetX",24).toInt());
+ const int insetY=std::max(0,settings_.value("offsetY",24).toInt());
+ const int right=std::max(available.left(),available.right()-widths.window+1);
+ const int bottom=std::max(available.top(),available.bottom()-contentHeight-16+1);
+ const int x=corner%2?right-insetX:available.left()+insetX;
+ const int top=corner<2?available.top()+insetY:bottom-insetY;
+ const bool custom=settings_.value("customPosition",false).toBool();
+ badge_->setMinimumSize(1,1);badge_->setMaximumSize(QWIDGETSIZE_MAX,QWIDGETSIZE_MAX);
+ badge_->setGeometry(QRect(QPoint(std::clamp(custom?settings_.value("positionX",x).toInt():x,available.left(),right)-halo,
+  std::clamp(custom?settings_.value("positionY",top).toInt():top,available.top(),bottom)-halo),size));
+ information_->setMinimumSize(0,0);information_->setMaximumSize(QWIDGETSIZE_MAX,QWIDGETSIZE_MAX);
+ information_->setGeometry(badge_->rect());
+ for(auto it=rectangles.cbegin();it!=rectangles.cend();++it){
+  auto *widget=widgets.value(it.key());widget->setGeometry(it.value());
+  if(widget->layout())widget->layout()->setGeometry(widget->rect());
+ }
+ static_cast<NotificationPanel*>(badge_)->updateCards();placing_=false;
+}
 QMap<QString,QWidget*> LookoutDock::movableCards() const {
  QMap<QString,QWidget*> result;for(const auto &entry:{qMakePair(QString("thumbnail"),previewCard_),qMakePair(QString("alert"),static_cast<QWidget*>(badgeText_)),qMakePair(QString("stats"),stats_),qMakePair(QString("bitrate"),static_cast<QWidget*>(bitrates_)),qMakePair(QString("replay"),static_cast<QWidget*>(replay_)),qMakePair(QString("active-icons"),static_cast<QWidget*>(activeIcons_))})if(!entry.second->isHidden())result.insert(entry.first,entry.second);
- if(independentLayout_){for(int i=0;i<HistoryGraphs::Count;++i)if(!graphViews_[i]->isHidden())result.insert(HistoryGraphs::metrics[i].card,graphViews_[i]);}else if(!graphs_->isHidden())result.insert("graphs",graphs_);
+ if(separateGraphCards()){for(int i=0;i<HistoryGraphs::Count;++i)if(!graphViews_[i]->isHidden())result.insert(HistoryGraphs::metrics[i].card,graphViews_[i]);}else if(!graphs_->isHidden())result.insert("graphs",graphs_);
  return result;
 }
 void LookoutDock::setIndependentLayout(bool enabled){
- if(enabled==independentLayout_)return;placing_=true;transformTimer_.stop();independentLayout_=enabled;
+ const bool automatic=!enabled && !settings_.contains("panelOrder");
+ if(enabled==independentLayout_ && badge_->layout()->isEnabled()==automatic)return;placing_=true;transformTimer_.stop();independentLayout_=enabled;
  // Keep ownership stable. Reparenting hidden cards can leave their old
  // rectangles in the next scene sent to the Quick renderer.
- information_->layout()->setEnabled(!enabled);
- badge_->layout()->setEnabled(!enabled);
+ information_->layout()->setEnabled(automatic);
+ panelLayout_->setEnabled(automatic);
+ badge_->layout()->setEnabled(automatic);
  placing_=false;
 }
 void LookoutDock::placeIndependent(){
@@ -1209,8 +1308,7 @@ void LookoutDock::placeIndependent(){
  const int thumbWidth=std::max(1,cardWidth("thumbnail",std::min(width,std::clamp(settings_.value("thumbnailWidth",320).toInt(),80,800)+16))-16);
  layoutThumbnail(thumbWidth+16,thumbWidth);
  const auto widgets=movableCards();QMap<QString,QSize> sizes;int total=0;
- QStringList order{"thumbnail","alert","stats","active-icons","bitrate","replay"};
- for(const auto &metric:HistoryGraphs::metrics)order.append(metric.card);
+ const QStringList order=panelOrder();
  for(const auto &id:order)if(auto *widget=widgets.value(id)){
   const int w=widget==activeIcons_?std::min(cardWidth(id,width),activeIcons_->maximumWidth()):cardWidth(id,width);
   const int height=widget==previewCard_?previewCard_->height():widget==stats_?statsLayout_->sizeHint().height():widget->heightForWidth(w);
@@ -1234,7 +1332,7 @@ QVector<QRectF> LookoutDock::glowTargets() const {
    result<<QRectF(activeIcons_->mapTo(badge_,QPoint()),activeIcons_->size());iconsAdded=true;
   }
   if(stats_->isVisibleTo(badge_) && hasReading(stat) && !statsAdded){result<<QRectF(stats_->mapTo(badge_,QPoint()),stats_->size());statsAdded=true;}
-  HistoryGraphs *view=independentLayout_?graphViews_[metric]:graphs_;if(view->isVisibleTo(badge_)){const QRectF card=view->metricRect(metric);if(!card.isEmpty())result<<card.translated(view->mapTo(badge_,QPoint()));}
+  HistoryGraphs *view=separateGraphCards()?graphViews_[metric]:graphs_;if(view->isVisibleTo(badge_)){const QRectF card=view->metricRect(metric);if(!card.isEmpty())result<<card.translated(view->mapTo(badge_,QPoint()));}
   thumbnailAffected|=alertIcon_->property("alertRole").toString()==role;
  }
  if(result.isEmpty() && thumbnailAffected && !thumbnailAlertPreview_.isActive() && alertIcon_->isVisibleTo(badge_))

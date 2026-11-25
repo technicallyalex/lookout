@@ -59,6 +59,8 @@ Control {
         case 0: return [
             group("Visibility", [
                 choice("panelMode","Show panels",["Only for alerts","Always","Off"]),
+                toggle("hideOnHover","Fade hovered panel",
+                    "Desktop only. Keeps panels visible in fullscreen apps, with a hidden cursor, or while editing placement."),
                 toggle("showInCaptures","Include in recordings and streams",state.captureStatus || "Private by default")]),
             group("Transitions", [
                 Object.assign(choice("panelTransition","Show and hide",["Instant","Fade","Flash","Slide","Blur","Fall"],
@@ -68,7 +70,8 @@ Control {
             group("Thumbnail", [
                 toggle("thumbnail","Show thumbnail"),
                 choice("thumbnailPosition","Thumbnail placement",
-                       ["Above metrics","Below metrics","Left of metrics","Right of metrics"],
+                       ["Above metrics","Below metrics","Left of metrics","Right of metrics"].concat(
+                           state.panelOrderCustomized ? ["In panel order"] : []),
                        null,v.independentCards && !v.iconStrip),
                 {kind:"toggle",key:"showAlertIcon",label:"Show alert symbol on thumbnail",
                  disabled:!v.thumbnail,thumbnailPreview:true}]),
@@ -86,7 +89,8 @@ Control {
                 graph("memory"),graph("disk-time"),graph("bitrate"),graph("replay")]),
             group("History", [
                 choice("graphWindow","Chart time range",["30 seconds","1 minute","5 minutes","15 minutes"],[30,60,300,900]),
-                action("clearHistory","Discard samples collected this session","Clear history")])];
+                action("clearHistory","Discard samples collected this session","Clear history")]),
+            {title:"",fields:[],panelOrder:true}];
         case 2: return [
             group("Colors and charts", [
                 choice("panelDesign","Colors",["Follow OBS","Violet","lookout","Teal","Amber"],["obs","layered","minimal","studio","signal"]),
@@ -264,12 +268,14 @@ Control {
                                         required property int index
                                         readonly property var section: groupColumn.groups[index]
                                         Layout.fillWidth: true
-                                        implicitHeight: rows.implicitHeight + 28
+                                        implicitHeight: section.panelOrder ? panelOrderEditor.implicitHeight : rows.implicitHeight + 28
                                         radius: 10
-                                        color: root.surface
+                                        color: section.panelOrder ? "transparent" : root.surface
+                                        border.width: section.panelOrder ? 0 : 1
                                         border.color: root.edge
                                         ColumnLayout {
                                             id: rows
+                                            visible: !sectionCard.section.panelOrder
                                             anchors.fill: parent
                                             anchors.margins: 14
                                             spacing: 5
@@ -290,6 +296,22 @@ Control {
                                                     state: root.state
                                                     api: root.controller
                                                 }
+                                            }
+                                        }
+                                        Loader {
+                                            id: panelOrderEditor
+                                            active: !!sectionCard.section.panelOrder
+                                            width: parent.width
+                                            sourceComponent: DockSettings {
+                                                panelEditor: true
+                                                controller: root.controller
+                                                options: root.state.panelOptions || []
+                                                order: root.state.panelOrder || []
+                                                showLabels: false
+                                                surface: root.surface
+                                                edge: root.edge
+                                                ink: root.ink
+                                                dark: !!root.state.dark
                                             }
                                         }
                                     }
@@ -329,13 +351,18 @@ Control {
                         visible: root.page === 7
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
-                        text: "lookout " + (root.state.version || "") + "\n" + (root.state.build || "") +
-                              "\n\nRelease Candidate 2"
+                        text: "lookout " + (root.state.version || "") + "\n" + (root.state.build || "")
                     }
                     Button {
                         visible: root.page === 7
                         text: "GitHub Releases"
                         onClicked: Qt.openUrlExternally("https://github.com/technicallyalex/lookout/releases")
+                    }
+                    Loader {
+                        active: root.page === 7
+                        visible: active
+                        Layout.fillWidth: true
+                        sourceComponent: UpdateSettings { updater: root.controller.updater }
                     }
                     Item { Layout.preferredHeight: 16 }
                 }

@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory)] [string] $QtSdk,
     [Parameter(Mandatory)] [string] $CrtDir,
     [Parameter(Mandatory)] [string] $QtLicenseDir,
-    [string] $Version = '1.0.0-rc.2'
+    [string] $Version = '1.0.0-rc.3'
 )
 $ErrorActionPreference = 'Stop'
 $project = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -26,7 +26,7 @@ New-Item -ItemType Directory -Path $ui,$dist -Force | Out-Null
 Check-Native 'Plugin staging'
 & $CMakeExe --install (Join-Path $project 'build-quick') --config RelWithDebInfo --prefix $stage
 Check-Native 'Renderer staging'
-& (Join-Path $QtSdk 'bin\windeployqt.exe') --release --qmldir (Join-Path $project 'quick') --no-translations --no-opengl-sw --no-system-d3d-compiler --no-compiler-runtime --skip-plugin-types 'generic,networkinformation,tls,qmltooling' --dir $ui (Join-Path $ui 'lookout-ui.exe')
+& (Join-Path $QtSdk 'bin\windeployqt.exe') --release --qmldir (Join-Path $project 'quick') --no-translations --no-opengl-sw --no-system-d3d-compiler --no-compiler-runtime --skip-plugin-types 'generic,networkinformation,qmltooling' --dir $ui (Join-Path $ui 'lookout-ui.exe')
 Check-Native 'Qt runtime staging'
 Get-ChildItem -LiteralPath $CrtDir -Filter '*.dll' -File | Copy-Item -Destination $ui
 [IO.File]::WriteAllText((Join-Path $ui 'qt.conf'),"[Paths]`nPrefix=.`nPlugins=.`nQmlImports=qml`n",$encoding)
@@ -44,7 +44,7 @@ New-Item -ItemType Directory -Path (Join-Path $ui 'licenses') | Out-Null
 foreach ($name in 'LGPL-3.0-only.txt','GPL-3.0-only.txt','GPL-2.0-only.txt') { Copy-Item -LiteralPath (Join-Path $QtLicenseDir $name) -Destination (Join-Path $ui 'licenses') }
 $manifest = [ordered]@{
     version = $Version
-    build = '2026-11-10-rc2'
+    build = '2026-11-25-rc3'
     builtUtc = [DateTime]::UtcNow.ToString('o')
     dllSha256 = (Get-FileHash -LiteralPath (Join-Path $payload 'lookout.dll')).Hash
     rendererSha256 = (Get-FileHash -LiteralPath (Join-Path $ui 'lookout-ui.exe')).Hash

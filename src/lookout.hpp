@@ -115,6 +115,10 @@ private:
  QMap<QString,QRect> cardGeometry_;
  void setIndependentLayout(bool enabled);
  void placeIndependent();
+ void placeOrdered();
+ QStringList panelOrder() const;
+ void editPanelOrder(const QString &id,const QString &operation,int target=-1);
+ bool separateGraphCards() const;
  QMap<QString,QWidget*> movableCards() const;
  double panelScale() const;
  int displayMode() const;

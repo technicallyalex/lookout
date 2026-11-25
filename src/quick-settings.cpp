@@ -18,14 +18,14 @@
 namespace {
 const QMap<QString, bool> switches{
  {"showBitrate",true},{"showAlertIcon",true},
- {"showInCaptures",false},{"glowEnabled",false},
+ {"showInCaptures",false},{"glowEnabled",false},{"hideOnHover",false},
  {"independentCards",false},{"snapCards",true},{"snapScreen",true},
  {"storage",true},{"encoder",true},{"network",true},{"lifecycle",true},{"untilDismiss",false}
 };
 struct Range { double initial, minimum, maximum; };
 const QMap<QString, Range> numbers{
  {"panelMode",{0,0,2}},{"monitor",{0,0,64}},{"corner",{1,0,3}},
- {"thumbnailPosition",{0,0,3}},{"panelScale",{1,0,4}},{"customSizePercent",{100,45,300}},
+ {"thumbnailPosition",{0,0,4}},{"panelScale",{1,0,4}},{"customSizePercent",{100,45,300}},
  {"offsetX",{24,0,10000}},{"offsetY",{24,0,10000}},{"panelWidth",{520,128,960}},
  {"thumbnailWidth",{320,80,800}},{"cardSpacing",{8,0,64}},{"snapDistance",{12,0,64}},
  {"backgroundOpacity",{100,0,100}},{"blurAmount",{0,0,100}},{"logoTheme",{0,0,2}},
@@ -161,7 +161,19 @@ void QuickPanelBridge::publishSettings()
  },&bindings);
  QJsonArray shortcuts;
  for(const auto key:dock.keys_)shortcuts.append(bindings.value(key).join(" / "));
- QJsonArray dockOptions,dockOrder;
+ QJsonArray dockOptions,dockOrder,panelOptions,panelOrder;
+ const auto panelOption=[&](const QString &id,const QString &label,const QString &icon){
+  panelOptions.append(QJsonObject{{"id",id},{"label",label},{"icon",icon}});
+ };
+ panelOption("thumbnail","Thumbnail","thumbnail");
+ panelOption("alert","Alerts","alerts");
+ panelOption("stats","Text stats","stats");
+ panelOption("active-icons","Icons","layout");
+ panelOption("bitrate","Bitrate graph","graphs");
+ panelOption("replay","Replay Buffer graph","replay");
+ for(const auto &metric:HistoryGraphs::metrics)
+  panelOption(metric.card,QString::fromUtf8(metric.label)+" graph",metric.id);
+ for(const auto &id:dock.panelOrder())panelOrder.append(id);
  QJsonObject statLabels;
  for(const auto &stat:dock.statDefinitions_)statLabels.insert(stat.id,QString::fromUtf8(stat.label.full));
  for(const auto &option:dock.dockButtonOptions_)
@@ -173,6 +185,8 @@ void QuickPanelBridge::publishSettings()
  const QJsonObject state{{"values",values},{"monitors",monitors},{"presets",presets},{"shortcuts",shortcuts},
   {"statLabels",statLabels},
   {"dockOptions",dockOptions},{"dockOrder",dockOrder},{"dockLabels",dock.dockShowsLabels()},
+  {"panelOptions",panelOptions},{"panelOrder",panelOrder},
+  {"panelOrderCustomized",dock.settings_.contains("panelOrder")},
   {"editing",dock.editMode_},{"hasAlerts",dock.alertActive_ || dock.sessionNotice_},
   {"hasPreview",dock.glowPreviewUntil_>dock.glowClock_.elapsed()},
   {"thumbnailAlertPreview",dock.thumbnailAlertPreview_.isActive()},
@@ -194,6 +208,13 @@ void QuickPanelBridge::settingsCommand(const QJsonObject &message)
  const auto value=message["value"];
  const QString key=message["key"].toString();
  auto &settings=dock.settings_;
+ if(action=="panelOrder"){
+  if(!dock.ready_)return;
+  if(value.isString())dock.editPanelOrder(key,value.toString());
+  else if(value.isDouble())dock.editPanelOrder(key,"move",value.toInt(-1));
+  else return;
+  publish();publishSettings();return;
+ }
  if(action=="dockLabels" && value.isBool()){
   dock.setDockLabels(value.toBool());
   publishSettings();
@@ -326,6 +347,11 @@ void QuickPanelBridge::settingsCommand(const QJsonObject &message)
     dock.applyCustomSize();
    }else{
     settings.setValue(key,key=="gib" || key=="glowSpeed"?QVariant(number):QVariant(int(number)));
+    if(key=="thumbnailPosition" && int(number)<2 && settings.contains("panelOrder")){
+     auto order=dock.panelOrder();order.removeAll("thumbnail");
+     if(int(number)==0)order.prepend("thumbnail");else order.append("thumbnail");
+     settings.setValue("panelOrder",order);
+    }
     if(key=="monitor" || key=="corner" || key=="offsetX" || key=="offsetY")
      settings.setValue("customPosition",false);
     if(key=="panelWidth" || key=="thumbnailWidth")dock.rememberCustomSize();

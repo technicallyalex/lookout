@@ -55,7 +55,13 @@ Item {
             x: c.x + origin.x + travel.x
             y: c.y + origin.y + travel.y
             width: c.w; height: c.h
-            opacity: root.motion.opacity === undefined ? 1 : root.motion.opacity
+            property real hoverOpacity: c.hoverHidden ? 0 : 1
+            Behavior on hoverOpacity {
+                enabled: !root.s.edit
+                NumberAnimation { duration: 160; easing.type: Easing.InOutQuad }
+            }
+            onHoverOpacityChanged: controller.setCardHoverOpacity(cardKey, hoverOpacity)
+            opacity: (root.motion.opacity === undefined ? 1 : root.motion.opacity) * hoverOpacity
             property bool glowing: root.targeted(c)
             readonly property real cornerRadius: 8
             Repeater {

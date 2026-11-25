@@ -2,6 +2,7 @@
 #include "shared-preview.hpp"
 #include "backdrop.hpp"
 #include "panel-transition.hpp"
+#include "updater.hpp"
 #include <QGuiApplication>
 #include <QQuickView>
 #include <QQuickItem>
@@ -47,8 +48,12 @@ class Controller final:public QObject {
  Q_PROPERTY(QVariantMap motion READ motion NOTIFY motionChanged)
  Q_PROPERTY(QVariantMap settings READ settings NOTIFY settingsChanged)
  Q_PROPERTY(int shortcutIndex READ shortcutIndex NOTIFY shortcutChanged)
+ Q_PROPERTY(QObject* updater READ updater CONSTANT)
 public:
  QQuickView view;
+ LookoutUpdater updater_;
+ quint32 updaterParent_=0;
+ QObject *updater(){return &updater_;}
  std::unique_ptr<QQuickView> settingsView;
  HICON settingsCaptionIcon=nullptr;
  std::optional<bool> settingsIconDark;
@@ -61,6 +66,7 @@ public:
  QByteArray incoming;
  QVariantMap scene_;
  QVariantMap motion_;
+ QVariantMap hoverOpacities_;
  QJsonObject visibleScene_;
  PanelTransition transition_;
  QElapsedTimer motionClock_;
@@ -101,6 +107,24 @@ public:
         {"trackPointer",true},{"sx",origin.x()},{"sy",origin.y()},{"ex",origin.x()},{"ey",origin.y()}});
  }
  Q_INVOKABLE void dismiss(){send({{"type","dismiss"}});}
+ Q_INVOKABLE void setCardHoverOpacity(const QString &key,double opacity){
+  const auto cards=visibleScene_["cards"].toArray();
+  for(int index=0;index<cards.size();++index){
+   if(cardKey(cards[index].toObject())!=key)continue;
+   opacity=std::clamp(opacity,0.0,1.0);hoverOpacities_[key]=opacity;
+   if(index>=backdrops.size() || motionTimer_.isActive() || !targetVisible_ || !view.isVisible())return;
+   const HWND window=backdrops[index];
+   if(opacity<=0 || visibleScene_["blurAmount"].toInt()<=0){ShowWindow(window,SW_HIDE);return;}
+   if(!protect(window,visibleScene_["public"].toBool()) ||
+      !backdropHost.update(window,visibleScene_["blurAmount"].toInt()) ||
+      !SetLayeredWindowAttributes(window,0,BYTE(qRound(opacity*255)),LWA_ALPHA)){
+    ShowWindow(window,SW_HIDE);return;
+   }
+   SetWindowPos(window,reinterpret_cast<HWND>(view.winId()),0,0,0,0,
+                SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_SHOWWINDOW);
+   return;
+  }
+ }
  Q_INVOKABLE void setting(QString action,QVariant value={},QString key={}){
   send({{"type","settings"},{"action",action},{"key",key},{"value",QJsonValue::fromVariant(value)}});
  }
@@ -159,6 +183,7 @@ public:
  }
  void acceptSettings(const QJsonObject &state,bool open){
   settings_=state.toVariantMap();
+  updater_.configure(state["version"].toString(),updaterParent_);
   emit settingsChanged();
   if(!open){
    updateSettingsIcon();
@@ -285,6 +310,7 @@ public:
   targetVisible_=false;
   view.hide();hideBackdrops();
   visibleScene_={};
+  hoverOpacities_.clear();
   if(!scene_.isEmpty()){scene_.clear();emit changed();}
   setMotion({});
  }
@@ -410,11 +436,16 @@ public:
    if(!protect(w,s["public"].toBool())){ShowWindow(w,SW_HIDE);continue;}
    if(!backdropHost.update(w,amount)){ShowWindow(w,SW_HIDE);continue;}
    const auto c=cards[i].toObject();
+   const double opacity=hoverOpacities_.value(cardKey(c),c["hoverHidden"].toBool()?0.0:1.0).toDouble();
+   if(!SetLayeredWindowAttributes(w,0,BYTE(qRound(opacity*255)),LWA_ALPHA)){
+    ShowWindow(w,SW_HIDE);continue;
+   }
    const int x=origin.left+qRound(c["x"].toDouble()*dpi),y=origin.top+qRound(c["y"].toDouble()*dpi),
     width=qRound(c["w"].toDouble()*dpi),height=qRound(c["h"].toDouble()*dpi);
    const int corner=2;const DWORD border=0xfffffffe;
    DwmSetWindowAttribute(w,33,&corner,sizeof(corner));DwmSetWindowAttribute(w,34,&border,sizeof(border));
-   SetWindowPos(w,panel,x,y,width,height,SWP_NOACTIVATE|SWP_SHOWWINDOW);
+   SetWindowPos(w,panel,x,y,width,height,SWP_NOACTIVATE|(opacity>0?SWP_SHOWWINDOW:0));
+   if(opacity<=0)ShowWindow(w,SW_HIDE);
   }
  }
 signals:
@@ -427,7 +458,7 @@ int main(int argc,char **argv){
  qInstallMessageHandler([](QtMsgType,const QMessageLogContext&,const QString &message){const auto text=message.toUtf8();std::fprintf(stderr,"%s\n",text.constData());std::fflush(stderr);});
  QGuiApplication app(argc,argv);app.setQuitOnLastWindowClosed(false);QCoreApplication::setApplicationName("lookout UI");QQuickStyle::setStyle("Fusion");QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);QSurfaceFormat format;format.setSamples(4);QSurfaceFormat::setDefaultFormat(format);qmlRegisterType<SharedPreview>("Lookout",1,0,"SharedPreview");
  QCommandLineParser args;args.addOption(QCommandLineOption(QStringLiteral("socket"),QStringLiteral("Local endpoint"),QStringLiteral("endpoint")));args.addOption(QCommandLineOption(QStringLiteral("token"),QStringLiteral("Session token"),QStringLiteral("token")));args.addOption(QCommandLineOption(QStringLiteral("parent"),QStringLiteral("OBS process"),QStringLiteral("pid")));args.process(app);if(args.value("socket").isEmpty() || args.value("token").isEmpty() || args.value("parent").isEmpty())return 1;
- Controller c;c.parent=OpenProcess(SYNCHRONIZE,FALSE,args.value("parent").toULong());if(!c.parent)return 1;c.heartbeat.start();
+ Controller c;c.updaterParent_=args.value("parent").toUInt();c.parent=OpenProcess(SYNCHRONIZE,FALSE,c.updaterParent_);if(!c.parent)return 1;c.heartbeat.start();
  QObject::connect(&c.socket,&QLocalSocket::connected,&c,[&]{c.send({{"type","hello"},{"version",1},{"token",args.value("token")}});});QObject::connect(&c.socket,&QLocalSocket::disconnected,&app,&QCoreApplication::quit);
  QObject::connect(&c.socket,&QLocalSocket::readyRead,&c,[&]{c.incoming+=c.socket.readAll();if(c.incoming.size()>2*1024*1024){app.exit(3);return;}for(int end;(end=c.incoming.indexOf('\n'))>=0;){auto line=c.incoming.left(end);c.incoming.remove(0,end+1);QJsonParseError error;auto document=QJsonDocument::fromJson(line,&error);if(error.error!=QJsonParseError::NoError){app.exit(3);return;}auto object=document.object();c.heartbeat.restart();if(object["type"]=="quit"){app.quit();return;}if(object["type"]=="scene")c.accept(object["scene"].toObject());else if(object["type"]=="settings")c.acceptSettings(object["state"].toObject(),object["open"].toBool());}});
  QTimer watchdog;watchdog.setInterval(500);QObject::connect(&watchdog,&QTimer::timeout,&c,[&]{if((!c.colorPickerOpen && c.heartbeat.elapsed()>5000) || WaitForSingleObject(c.parent,0)!=WAIT_TIMEOUT){c.view.hide();c.hideBackdrops();app.quit();}});watchdog.start();

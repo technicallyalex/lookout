@@ -42,6 +42,8 @@ private:
  QProcess process_;
  QTimer timer_;
  QTimer pointerTimer_;
+ QTimer hoverTimer_;
+ QJsonObject hoverScene_;
  enum class PreviewPhase { Idle, Prepare, Show, Hide, Restore };
  PreviewPhase transitionPreview_=PreviewPhase::Idle;
  QTimer transitionPreviewTimer_;
@@ -54,6 +56,8 @@ private:
  bool settingsOpen_=false, capturingShortcut_=false;
  bool authenticated_=false,stopping_=false;
  bool overlayBlocked_=false;
+ QString hoveredCard_;
+ QString panelUnderPointer(const QJsonObject &scene) const;
  int attempts_=0;
  void launch();
  void receive();

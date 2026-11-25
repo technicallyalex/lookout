@@ -35,6 +35,10 @@ QuickPanelBridge::QuickPanelBridge(LookoutDock *dock,const QString &executable):
  pointerTimer_.setInterval(16);
  pointerTimer_.setTimerType(Qt::PreciseTimer);
  connect(&pointerTimer_,&QTimer::timeout,this,&QuickPanelBridge::trackPointer);
+ hoverTimer_.setInterval(75);
+ connect(&hoverTimer_,&QTimer::timeout,this,[this]{
+  if(authenticated_ && panelUnderPointer(hoverScene_)!=hoveredCard_)publish();
+ });
  token_=QUuid::createUuid().toString(QUuid::WithoutBraces);endpoint_="lookout-"+QUuid::createUuid().toString(QUuid::WithoutBraces);
 #ifdef _WIN32
  frameEventName_=QStringLiteral("Local\\")+endpoint_+QStringLiteral("-frame");
@@ -140,16 +144,62 @@ void QuickPanelBridge::trackPointer(){
           {"sx",dock_->dragOrigin_.x()},{"sy",dock_->dragOrigin_.y()},{"ex",position.x()},{"ey",position.y()}});
 #endif
 }
+QString QuickPanelBridge::panelUnderPointer(const QJsonObject &scene) const {
+#ifdef _WIN32
+ if(!dock_->settings_.value("hideOnHover",false).toBool() || !scene["visible"].toBool() ||
+    scene["edit"].toBool() || transitionPreviewActive())return {};
+ const auto bounds=scene["bounds"].toObject();
+ const QPoint pointer=QCursor::pos()-QPoint(bounds["x"].toInt(),bounds["y"].toInt());
+ QString selected,nearby;
+ const auto cards=scene["cards"].toArray();
+ for(int index=cards.size()-1;index>=0;--index){
+  const auto card=cards[index].toObject();
+  const QString key=card["id"].toString()+":"+card["label"].toString(card["type"].toString());
+  const QRect area(card["x"].toInt(),card["y"].toInt(),card["w"].toInt(),card["h"].toInt());
+  if(area.contains(pointer)){selected=key;break;}
+  if(key==hoveredCard_ && area.adjusted(-4,-4,4,4).contains(pointer))nearby=key;
+ }
+ if(selected.isEmpty())selected=nearby;
+ if(selected.isEmpty())return {};
+ CURSORINFO cursor{sizeof(cursor)};
+ if(!GetCursorInfo(&cursor) || !(cursor.flags&CURSOR_SHOWING))return {};
+ const HWND foreground=GetForegroundWindow();
+ RECT window{};MONITORINFO monitor{sizeof(monitor)};
+ if(foreground && !IsIconic(foreground) && GetWindowRect(foreground,&window) &&
+    GetMonitorInfoW(MonitorFromWindow(foreground,MONITOR_DEFAULTTONEAREST),&monitor) &&
+    window.left<=monitor.rcMonitor.left && window.top<=monitor.rcMonitor.top &&
+    window.right>=monitor.rcMonitor.right && window.bottom>=monitor.rcMonitor.bottom)return {};
+ return selected;
+#else
+ Q_UNUSED(scene);
+#endif
+ return {};
+}
 void QuickPanelBridge::publish(){
  if(stopping_ || !authenticated_)return;
  const auto blockReason=dock_->ready_ && dock_->quickVisible_?dock_->overlayBlockReason():QString{};
  overlayBlocked_=!blockReason.isEmpty();
  publishSettings();QJsonObject scene=snapshot(blockReason);
- thumbnail_=scene["visible"].toBool() && scene["hasThumbnail"].toBool();
+ hoverScene_=scene;
+ if(dock_->settings_.value("hideOnHover",false).toBool() && scene["visible"].toBool() && !scene["edit"].toBool()){
+  if(!hoverTimer_.isActive())hoverTimer_.start();
+ }else hoverTimer_.stop();
+ hoveredCard_=panelUnderPointer(scene);
+ auto cards=scene["cards"].toArray();
+ bool thumbnailHovered=false;
+ for(int index=0;index<cards.size();++index){
+  auto card=cards[index].toObject();
+  const QString key=card["id"].toString()+":"+card["label"].toString(card["type"].toString());
+  const bool hidden=key==hoveredCard_;
+  card["hoverHidden"]=hidden;cards[index]=card;
+  thumbnailHovered|=hidden && card["type"]=="thumbnail";
+ }
+ scene["cards"]=cards;
+ thumbnail_=scene["visible"].toBool() && scene["hasThumbnail"].toBool() && !thumbnailHovered;
  {std::lock_guard<std::mutex> lock(gpuMutex_);scene["texture"]=QJsonObject{{"handle",double(handle_)},{"generation",generation_},{"width",640},{"height",360},{"luidLow",double(luidLow_)},{"luidHigh",double(luidHigh_)},{"graphicsReady",graphicsReady_},{"supported",thumbnailSupported_},{"frameEvent",frameEventName_}};}
  const auto bytes=QJsonDocument(scene).toJson(QJsonDocument::Compact);if(bytes!=lastScene_){send({{"type","scene"},{"scene",scene}});lastScene_=bytes;heartbeat_.restart();}else if(heartbeat_.elapsed()>1000){send({{"type","heartbeat"}});heartbeat_.restart();}
 }
-void QuickPanelBridge::stop(){if(stopping_)return;stopping_=true;timer_.stop();transitionPreviewTimer_.stop();transitionPreview_=PreviewPhase::Idle;thumbnail_=false;obs_remove_main_rendered_callback(render,this);send({{"type","quit"}});if(socket_)socket_->flush();if(process_.state()!=QProcess::NotRunning && !process_.waitForFinished(1200)){process_.terminate();if(!process_.waitForFinished(500)){process_.kill();process_.waitForFinished(500);}}freeTexture();}
+void QuickPanelBridge::stop(){if(stopping_)return;stopping_=true;timer_.stop();hoverTimer_.stop();transitionPreviewTimer_.stop();transitionPreview_=PreviewPhase::Idle;thumbnail_=false;obs_remove_main_rendered_callback(render,this);send({{"type","quit"}});if(socket_)socket_->flush();if(process_.state()!=QProcess::NotRunning && !process_.waitForFinished(1200)){process_.terminate();if(!process_.waitForFinished(500)){process_.kill();process_.waitForFinished(500);}}freeTexture();}
 QuickPanelBridge::~QuickPanelBridge(){
  stop();
 #ifdef _WIN32
@@ -268,7 +318,7 @@ QJsonObject QuickPanelBridge::snapshot(const QString &blockReason) const {
   for(int i=0;i<HistoryGraphs::Count;++i)if(view->selected_[i]){
    const auto &metric=HistoryGraphs::metrics[i];
    auto c=rect(view->metricRect(i).translated(view->mapTo(d.badge_,QPoint())));
-   c["id"]=d.independentLayout_?metric.card:"graphs";
+   c["id"]=d.separateGraphCards()?metric.card:"graphs";
    c["type"]="chart";
    double min=INFINITY,max=-INFINITY;
    QJsonArray points;
